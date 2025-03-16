@@ -1,0 +1,1474 @@
+// Market Trend Spotter
+// Identifies emerging trends in the luxury watch market
+
+// Initialize trends database if it doesn't exist
+if (!ai.vars.global.marketTrends) {
+  ai.vars.global.marketTrends = {
+    brandTrends: {},
+    modelTrends: {},
+    marketInsights: [],
+    lastUpdated: null
+  };
+}
+
+// Validate configuration
+if (!ai.config.action) {
+  throw new Error("Action is required (add, analyze, or report)");
+}
+
+const outputVarName = ai.config.outputVarName || 'marketTrends';
+const trends = ai.vars.global.marketTrends;
+const now = new Date();
+const todayFormatted = now.toISOString().split('T')[0];
+
+// Process based on action type
+switch (ai.config.action.toLowerCase()) {
+  case 'add':
+    // Add a new market observation or data point
+    if (!ai.config.dataType) {
+      throw new Error("Data type is required (price, auction, waitlist, or insight)");
+    }
+    
+    if (!ai.config.brand) {
+      throw new Error("Brand is required for market data");
+    }
+    
+    // Process different types of market data
+    switch (ai.config.dataType.toLowerCase()) {
+      case 'price':
+        // Add price observation for a specific model
+        if (!ai.config.model || !ai.config.price) {
+          throw new Error("Model and price are required for price data");
+        }
+        
+        // Create brand entry if it doesn't exist
+        if (!trends.brandTrends[ai.config.brand]) {
+          trends.brandTrends[ai.config.brand] = {
+            priceHistory: [],
+            popularity: [],
+            marketShare: [],
+            models: {}
+          };
+        }
+        
+        // Create model key
+        const modelKey = `${ai.config.model}${ai.config.referenceNumber ? `|${ai.config.referenceNumber}` : ''}`;
+        
+        // Create model entry if it doesn't exist
+        if (!trends.brandTrends[ai.config.brand].models[modelKey]) {
+          trends.brandTrends[ai.config.brand].models[modelKey] = {
+            priceHistory: [],
+            demandIndicators: [],
+            premiumOverRetail: []
+          };
+        }
+        
+        // Add price data point
+        trends.brandTrends[ai.config.brand].models[modelKey].priceHistory.push({
+          date: ai.config.observationDate || todayFormatted,
+          price: Number(ai.config.price),
+          retailPrice: ai.config.retailPrice ? Number(ai.config.retailPrice) : null,
+          source: ai.config.source || "user observation"
+        });
+        
+        // Calculate premium over retail if available
+        if (ai.config.retailPrice) {
+          const premium = ((Number(ai.config.price) / Number(ai.config.retailPrice)) - 1) * 100;
+          trends.brandTrends[ai.config.brand].models[modelKey].premiumOverRetail.push({
+            date: ai.config.observationDate || todayFormatted,
+            premium: Number(premium.toFixed(2))
+          });
+        }
+        
+        // Also create/update entry in modelTrends
+        if (!trends.modelTrends[modelKey]) {
+          trends.modelTrends[modelKey] = {
+            brand: ai.config.brand,
+            model: ai.config.model,
+            referenceNumber: ai.config.referenceNumber || null,
+            priceHistory: [],
+            demandIndicators: []
+          };
+        }
+        
+        trends.modelTrends[modelKey].priceHistory.push({
+          date: ai.config.observationDate || todayFormatted,
+          price: Number(ai.config.price),
+          retailPrice: ai.config.retailPrice ? Number(ai.config.retailPrice) : null,
+          source: ai.config.source || "user observation"
+        });
+        
+        console.log(`Added price data for ${ai.config.brand} ${ai.config.model}: ${ai.config.price}`);
+        
+        ai.vars[outputVarName] = {
+          action: "add",
+          dataType: "price",
+          brand: ai.config.brand,
+          model: ai.config.model,
+          price: Number(ai.config.price),
+          date: ai.config.observationDate || todayFormatted,
+          success: true
+        };
+        break;
+        
+      case 'auction':
+        // Add auction result
+        if (!ai.config.model || !ai.config.price) {
+          throw new Error("Model and price are required for auction data");
+        }
+        
+        // Create model key
+        const auctionModelKey = `${ai.config.model}${ai.config.referenceNumber ? `|${ai.config.referenceNumber}` : ''}`;
+        
+        // Create or update auction results
+        if (!trends.modelTrends[auctionModelKey]) {
+          trends.modelTrends[auctionModelKey] = {
+            brand: ai.config.brand,
+            model: ai.config.model,
+            referenceNumber: ai.config.referenceNumber || null,
+            priceHistory: [],
+            auctionResults: [],
+            demandIndicators: []
+          };
+        }
+        
+        // Add auction result
+        trends.modelTrends[auctionModelKey].auctionResults.push({
+          date: ai.config.auctionDate || todayFormatted,
+          price: Number(ai.config.price),
+          auctionHouse: ai.config.auctionHouse || "Unknown",
+          estimatedRange: ai.config.estimatedRange || null,
+          lotNumber: ai.config.lotNumber || null,
+          condition: ai.config.condition || null,
+          boxPapers: ai.config.boxPapers || "Unknown"
+        });
+        
+        console.log(`Added auction result for ${ai.config.brand} ${ai.config.model}: ${ai.config.price}`);
+        
+        ai.vars[outputVarName] = {
+          action: "add",
+          dataType: "auction",
+          brand: ai.config.brand,
+          model: ai.config.model,
+          price: Number(ai.config.price),
+          date: ai.config.auctionDate || todayFormatted,
+          success: true
+        };
+        break;
+        
+      case 'waitlist':
+        // Add waitlist or availability data
+        if (!ai.config.model) {
+          throw new Error("Model is required for waitlist data");
+        }
+        
+        // Create model key
+        const waitlistModelKey = `${ai.config.model}${ai.config.referenceNumber ? `|${ai.config.referenceNumber}` : ''}`;
+        
+        // Create or update model
+        if (!trends.modelTrends[waitlistModelKey]) {
+          trends.modelTrends[waitlistModelKey] = {
+            brand: ai.config.brand,
+            model: ai.config.model,
+            referenceNumber: ai.config.referenceNumber || null,
+            priceHistory: [],
+            demandIndicators: []
+          };
+        }
+        
+        // Add demand indicator
+        trends.modelTrends[waitlistModelKey].demandIndicators.push({
+          date: ai.config.observationDate || todayFormatted,
+          waitlistLength: ai.config.waitlistLength || null,
+          waitlistTime: ai.config.waitlistTime || null, // in months
+          availability: ai.config.availability || null, // e.g., "high", "medium", "low"
+          source: ai.config.source || "user observation",
+          notes: ai.config.notes || null
+        });
+        
+        console.log(`Added waitlist data for ${ai.config.brand} ${ai.config.model}`);
+        
+        ai.vars[outputVarName] = {
+          action: "add",
+          dataType: "waitlist",
+          brand: ai.config.brand,
+          model: ai.config.model,
+          date: ai.config.observationDate || todayFormatted,
+          success: true
+        };
+        break;
+        
+      case 'insight':
+        // Add market insight or observation
+        if (!ai.config.insight) {
+          throw new Error("Insight content is required");
+        }
+        
+        // Add to market insights
+        trends.marketInsights.push({
+          date: ai.config.observationDate || todayFormatted,
+          insight: ai.config.insight,
+          category: ai.config.category || "general",
+          brands: ai.config.relevantBrands ? (Array.isArray(ai.config.relevantBrands) ? 
+            ai.config.relevantBrands : [ai.config.relevantBrands]) : [ai.config.brand],
+          models: ai.config.relevantModels ? (Array.isArray(ai.config.relevantModels) ? 
+            ai.config.relevantModels : [ai.config.relevantModels]) : 
+            (ai.config.model ? [ai.config.model] : []),
+          source: ai.config.source || "user observation",
+          impact: ai.config.impact || "neutral" // positive, negative, neutral
+        });
+        
+        console.log(`Added market insight: ${ai.config.insight.substring(0, 50)}...`);
+        
+        ai.vars[outputVarName] = {
+          action: "add",
+          dataType: "insight",
+          date: ai.config.observationDate || todayFormatted,
+          success: true
+        };
+        break;
+        
+      default:
+        throw new Error(`Unknown data type: ${ai.config.dataType}. Use price, auction, waitlist, or insight`);
+    }
+    break;
+    
+  case 'analyze':
+    // Analyze market trends based on collected data
+    const brandFilter = ai.config.brand || null;
+    const modelFilter = ai.config.model || null;
+    const refNumberFilter = ai.config.referenceNumber || null;
+    const analyzePeriod = ai.config.period || 'year'; // month, quarter, year, all
+    
+    // Calculate cutoff date based on period
+    let cutoffDate = new Date();
+    if (analyzePeriod === 'month') {
+      cutoffDate.setMonth(cutoffDate.getMonth() - 1);
+    } else if (analyzePeriod === 'quarter') {
+      cutoffDate.setMonth(cutoffDate.getMonth() - 3);
+    } else if (analyzePeriod === 'year') {
+      cutoffDate.setFullYear(cutoffDate.getFullYear() - 1);
+    } else {
+      // 'all' - no cutoff date
+      cutoffDate = new Date(0); // January 1, 1970
+    }
+    
+    const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    
+    // Analyze price trends
+    const priceTrends = analyzePriceTrends(trends, cutoffDateStr, brandFilter, modelFilter, refNumberFilter);
+    
+    // Analyze demand indicators
+    const demandTrends = analyzeDemandTrends(trends, cutoffDateStr, brandFilter, modelFilter, refNumberFilter);
+    
+    // Analyze market insights
+    const insightTrends = analyzeInsights(trends, cutoffDateStr, brandFilter, modelFilter);
+    
+    // Create market trend summary
+    const trendSummary = createTrendSummary(priceTrends, demandTrends, insightTrends);
+    
+    // Generate emerging trends
+    const emergingTrends = identifyEmergingTrends(trends, priceTrends, demandTrends, cutoffDateStr);
+    
+    console.log(`Analyzed market trends for period: ${analyzePeriod}`);
+    
+    ai.vars[outputVarName] = {
+      action: "analyze",
+      period: analyzePeriod,
+      priceTrends: priceTrends,
+      demandTrends: demandTrends,
+      insightTrends: insightTrends,
+      summary: trendSummary,
+      emergingTrends: emergingTrends,
+      date: todayFormatted,
+      success: true
+    };
+    break;
+    
+  case 'report':
+    // Generate a comprehensive market trend report
+    const reportTimeframe = ai.config.timeframe || 'year'; // month, quarter, year, all
+    
+    // Calculate report cutoff date
+    let reportCutoffDate = new Date();
+    if (reportTimeframe === 'month') {
+      reportCutoffDate.setMonth(reportCutoffDate.getMonth() - 1);
+    } else if (reportTimeframe === 'quarter') {
+      reportCutoffDate.setMonth(reportCutoffDate.getMonth() - 3);
+    } else if (reportTimeframe === 'year') {
+      reportCutoffDate.setFullYear(reportCutoffDate.getFullYear() - 1);
+    } else {
+      // 'all' - no cutoff date
+      reportCutoffDate = new Date(0);
+    }
+    
+    const reportCutoffDateStr = reportCutoffDate.toISOString().split('T')[0];
+    
+    // Generate market overview
+    const marketOverview = generateMarketOverview(trends, reportCutoffDateStr);
+    
+    // Generate brand performance
+    const brandPerformance = generateBrandPerformance(trends, reportCutoffDateStr);
+    
+    // Find hottest models
+    const hottestModels = findHottestModels(trends, reportCutoffDateStr, 5);
+    
+    // Find cooling models
+    const coolingModels = findCoolingModels(trends, reportCutoffDateStr, 5);
+    
+    // Generate availability insights
+    const availabilityInsights = generateAvailabilityInsights(trends, reportCutoffDateStr);
+    
+    // Generate auction performance
+    const auctionPerformance = generateAuctionPerformance(trends, reportCutoffDateStr);
+    
+    // Generate investment opportunities
+    const investmentOpportunities = generateInvestmentOpportunities(trends, reportCutoffDateStr);
+    
+    // Generate consolidated report
+    const report = {
+      timeframe: reportTimeframe,
+      overview: marketOverview,
+      brandPerformance: brandPerformance,
+      hottestModels: hottestModels,
+      coolingModels: coolingModels,
+      availability: availabilityInsights,
+      auctionTrends: auctionPerformance,
+      opportunities: investmentOpportunities,
+      generated: todayFormatted
+    };
+    
+    console.log(`Generated market trend report for timeframe: ${reportTimeframe}`);
+    
+    ai.vars[outputVarName] = {
+      action: "report",
+      report: report,
+      success: true
+    };
+    break;
+    
+  default:
+    throw new Error(`Unknown action: ${ai.config.action}. Use add, analyze, or report`);
+}
+
+// Update last updated timestamp
+trends.lastUpdated = todayFormatted;
+
+// Save the updated trends
+ai.vars.global.marketTrends = trends;
+
+// Helper functions
+
+// Analyze price trends
+function analyzePriceTrends(trends, cutoffDate, brandFilter, modelFilter, refNumberFilter) {
+  const results = {
+    models: [],
+    brands: [],
+    overall: {
+      averagePriceChange: 0,
+      trendDirection: "stable"
+    }
+  };
+  
+  let totalPriceChange = 0;
+  let modelCount = 0;
+  
+  // Process model trends
+  Object.entries(trends.modelTrends).forEach(([key, modelData]) => {
+    // Apply filters
+    if (brandFilter && modelData.brand !== brandFilter) return;
+    if (modelFilter && modelData.model !== modelFilter) return;
+    if (refNumberFilter && modelData.referenceNumber !== refNumberFilter) return;
+    
+    const history = modelData.priceHistory || [];
+    if (history.length < 2) return;
+    
+    // Filter history by cutoff date
+    const relevantHistory = history.filter(entry => entry.date >= cutoffDate);
+    if (relevantHistory.length < 2) return;
+    
+    // Sort by date
+    relevantHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get first and last data points
+    const firstPoint = relevantHistory[0];
+    const lastPoint = relevantHistory[relevantHistory.length - 1];
+    
+    // Calculate change
+    const priceChange = ((lastPoint.price - firstPoint.price) / firstPoint.price) * 100;
+    const absoluteChange = lastPoint.price - firstPoint.price;
+    
+    // Determine trend direction
+    let trendDirection = "stable";
+    if (priceChange > 3) trendDirection = "increasing";
+    if (priceChange < -3) trendDirection = "decreasing";
+    
+    // Calculate volatility (standard deviation of percentage changes between points)
+    let volatility = 0;
+    if (relevantHistory.length > 2) {
+      const percentChanges = [];
+      for (let i = 1; i < relevantHistory.length; i++) {
+        const prev = relevantHistory[i-1].price;
+        const curr = relevantHistory[i].price;
+        percentChanges.push(((curr - prev) / prev) * 100);
+      }
+      
+      const mean = percentChanges.reduce((a, b) => a + b, 0) / percentChanges.length;
+      volatility = Math.sqrt(percentChanges.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b, 0) / percentChanges.length);
+    }
+    
+    // Add to results
+    results.models.push({
+      brand: modelData.brand,
+      model: modelData.model,
+      referenceNumber: modelData.referenceNumber,
+      startPrice: firstPoint.price,
+      currentPrice: lastPoint.price,
+      priceChange: Number(priceChange.toFixed(2)),
+      absoluteChange: Number(absoluteChange.toFixed(2)),
+      trendDirection: trendDirection,
+      volatility: Number(volatility.toFixed(2)),
+      dataPoints: relevantHistory.length,
+      firstDate: firstPoint.date,
+      lastDate: lastPoint.date
+    });
+    
+    totalPriceChange += priceChange;
+    modelCount++;
+  });
+  
+  // Calculate overall average
+  if (modelCount > 0) {
+    results.overall.averagePriceChange = Number((totalPriceChange / modelCount).toFixed(2));
+    if (results.overall.averagePriceChange > 3) {
+      results.overall.trendDirection = "increasing";
+    } else if (results.overall.averagePriceChange < -3) {
+      results.overall.trendDirection = "decreasing";
+    }
+  }
+  
+  // Process brand trends
+  const brandData = {};
+  
+  results.models.forEach(model => {
+    const brand = model.brand;
+    
+    if (!brandData[brand]) {
+      brandData[brand] = {
+        totalChange: 0,
+        modelCount: 0,
+        increasingModels: 0,
+        decreasingModels: 0,
+        stableModels: 0
+      };
+    }
+    
+    brandData[brand].totalChange += model.priceChange;
+    brandData[brand].modelCount++;
+    
+    if (model.trendDirection === "increasing") {
+      brandData[brand].increasingModels++;
+    } else if (model.trendDirection === "decreasing") {
+      brandData[brand].decreasingModels++;
+    } else {
+      brandData[brand].stableModels++;
+    }
+  });
+  
+  // Calculate brand averages
+  Object.entries(brandData).forEach(([brand, data]) => {
+    results.brands.push({
+      brand: brand,
+      averagePriceChange: Number((data.totalChange / data.modelCount).toFixed(2)),
+      modelCount: data.modelCount,
+      increasingModels: data.increasingModels,
+      decreasingModels: data.decreasingModels,
+      stableModels: data.stableModels,
+      trendDirection: data.increasingModels > data.decreasingModels ? 
+        "increasing" : data.decreasingModels > data.increasingModels ? 
+        "decreasing" : "stable"
+    });
+  });
+  
+  // Sort models by price change (highest first)
+  results.models.sort((a, b) => b.priceChange - a.priceChange);
+  
+  // Sort brands by average price change (highest first)
+  results.brands.sort((a, b) => b.averagePriceChange - a.averagePriceChange);
+  
+  return results;
+}
+
+// Analyze demand trends
+function analyzeDemandTrends(trends, cutoffDate, brandFilter, modelFilter, refNumberFilter) {
+  const results = {
+    increasingDemand: [],
+    decreasingDemand: [],
+    stableDemand: []
+  };
+  
+  // Process model trends
+  Object.entries(trends.modelTrends).forEach(([key, modelData]) => {
+    // Apply filters
+    if (brandFilter && modelData.brand !== brandFilter) return;
+    if (modelFilter && modelData.model !== modelFilter) return;
+    if (refNumberFilter && modelData.referenceNumber !== refNumberFilter) return;
+    
+    const indicators = modelData.demandIndicators || [];
+    if (indicators.length === 0) return;
+    
+    // Filter by cutoff date
+    const relevantIndicators = indicators.filter(entry => entry.date >= cutoffDate);
+    if (relevantIndicators.length === 0) return;
+    
+    // Sort by date
+    relevantIndicators.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Analyze waitlist trends if available
+    let waitlistTrend = "unknown";
+    let waitlistChange = 0;
+    
+    const waitlistData = relevantIndicators.filter(i => i.waitlistLength !== null || i.waitlistTime !== null);
+    if (waitlistData.length >= 2) {
+      const firstPoint = waitlistData[0];
+      const lastPoint = waitlistData[waitlistData.length - 1];
+      
+      // Use either waitlist length or time, depending on what's available
+      let firstValue, lastValue;
+      
+      if (firstPoint.waitlistLength !== null && lastPoint.waitlistLength !== null) {
+        firstValue = firstPoint.waitlistLength;
+        lastValue = lastPoint.waitlistLength;
+      } else if (firstPoint.waitlistTime !== null && lastPoint.waitlistTime !== null) {
+        firstValue = firstPoint.waitlistTime;
+        lastValue = lastPoint.waitlistTime;
+      }
+      
+      if (firstValue !== undefined && lastValue !== undefined) {
+        waitlistChange = lastValue - firstValue;
+        
+        if (waitlistChange > 0) {
+          waitlistTrend = "increasing";
+        } else if (waitlistChange < 0) {
+          waitlistTrend = "decreasing";
+        } else {
+          waitlistTrend = "stable";
+        }
+      }
+    }
+    
+    // Analyze availability trends
+    let availabilityTrend = "unknown";
+    
+    const availabilityData = relevantIndicators.filter(i => i.availability !== null);
+    if (availabilityData.length >= 2) {
+      const firstPoint = availabilityData[0];
+      const lastPoint = availabilityData[availabilityData.length - 1];
+      
+      const availabilityValues = {
+        "very high": 5,
+        "high": 4,
+        "medium": 3,
+        "low": 2,
+        "very low": 1
+      };
+      
+      if (availabilityValues[firstPoint.availability] && availabilityValues[lastPoint.availability]) {
+        const firstValue = availabilityValues[firstPoint.availability];
+        const lastValue = availabilityValues[lastPoint.availability];
+        const availabilityChange = lastValue - firstValue;
+        
+        if (availabilityChange > 0) {
+          availabilityTrend = "increasing";
+        } else if (availabilityChange < 0) {
+          availabilityTrend = "decreasing";
+        } else {
+          availabilityTrend = "stable";
+        }
+      }
+    }
+    
+    // Determine overall demand trend (inverse of availability)
+    let demandTrend = "stable";
+    
+    if (waitlistTrend !== "unknown" && availabilityTrend !== "unknown") {
+      // Both indicators available
+      if (waitlistTrend === "increasing" && availabilityTrend === "decreasing") {
+        demandTrend = "increasing";
+      } else if (waitlistTrend === "decreasing" && availabilityTrend === "increasing") {
+        demandTrend = "decreasing";
+      } else if (waitlistTrend === "increasing" || availabilityTrend === "decreasing") {
+        demandTrend = "slightly increasing";
+      } else if (waitlistTrend === "decreasing" || availabilityTrend === "increasing") {
+        demandTrend = "slightly decreasing";
+      }
+    } else if (waitlistTrend !== "unknown") {
+      // Only waitlist available
+      demandTrend = waitlistTrend;
+    } else if (availabilityTrend !== "unknown") {
+      // Only availability available (inverse relationship)
+      if (availabilityTrend === "increasing") {
+        demandTrend = "decreasing";
+      } else if (availabilityTrend === "decreasing") {
+        demandTrend = "increasing";
+      }
+    }
+    
+    // Create demand entry
+    const demandEntry = {
+      brand: modelData.brand,
+      model: modelData.model,
+      referenceNumber: modelData.referenceNumber,
+      demandTrend: demandTrend,
+      waitlistTrend: waitlistTrend,
+      availabilityTrend: availabilityTrend,
+      latestWaitlist: waitlistData.length > 0 ? 
+        waitlistData[waitlistData.length - 1].waitlistLength || 
+        waitlistData[waitlistData.length - 1].waitlistTime : null,
+      latestAvailability: availabilityData.length > 0 ? 
+        availabilityData[availabilityData.length - 1].availability : null,
+      dataPoints: relevantIndicators.length
+    };
+    
+    // Add to appropriate category
+    if (demandTrend.includes("increasing")) {
+      results.increasingDemand.push(demandEntry);
+    } else if (demandTrend.includes("decreasing")) {
+      results.decreasingDemand.push(demandEntry);
+    } else {
+      results.stableDemand.push(demandEntry);
+    }
+  });
+  
+  // Sort categories by brand and model
+  const sortByBrandModel = (a, b) => {
+    if (a.brand === b.brand) {
+      return a.model.localeCompare(b.model);
+    }
+    return a.brand.localeCompare(b.brand);
+  };
+  
+  results.increasingDemand.sort(sortByBrandModel);
+  results.decreasingDemand.sort(sortByBrandModel);
+  results.stableDemand.sort(sortByBrandModel);
+  
+  return results;
+}
+
+// Analyze market insights
+function analyzeInsights(trends, cutoffDate, brandFilter, modelFilter) {
+  const insights = trends.marketInsights || [];
+  
+  // Filter insights
+  let filteredInsights = insights.filter(insight => insight.date >= cutoffDate);
+  
+  if (brandFilter) {
+    filteredInsights = filteredInsights.filter(insight => 
+      insight.brands.some(brand => brand.toLowerCase() === brandFilter.toLowerCase())
+    );
+  }
+  
+  if (modelFilter) {
+    filteredInsights = filteredInsights.filter(insight => 
+      insight.models.some(model => model.toLowerCase() === modelFilter.toLowerCase())
+    );
+  }
+  
+  // Sort by date, newest first
+  filteredInsights.sort((a, b) => new Date(b.date) - new Date(a.date));
+  
+  // Group by category
+  const categorizedInsights = {};
+  
+  filteredInsights.forEach(insight => {
+    const category = insight.category || "general";
+    
+    if (!categorizedInsights[category]) {
+      categorizedInsights[category] = [];
+    }
+    
+    categorizedInsights[category].push(insight);
+  });
+  
+  return {
+    total: filteredInsights.length,
+    byCategory: categorizedInsights,
+    recent: filteredInsights.slice(0, 5)
+  };
+}
+
+// Create trend summary
+function createTrendSummary(priceTrends, demandTrends, insightTrends) {
+  // Create overall market summary
+  const summary = {
+    overallMarket: {
+      priceDirection: priceTrends.overall.trendDirection,
+      averagePriceChange: priceTrends.overall.averagePriceChange,
+      increasingDemandModels: demandTrends.increasingDemand.length,
+      decreasingDemandModels: demandTrends.decreasingDemand.length,
+      stableDemandModels: demandTrends.stableDemand.length
+    },
+    topPerformingBrands: priceTrends.brands.slice(0, 3),
+    worstPerformingBrands: [...priceTrends.brands].sort((a, b) => a.averagePriceChange - b.averagePriceChange).slice(0, 3),
+    hottestModels: priceTrends.models.slice(0, 5).map(model => ({
+      brand: model.brand,
+      model: model.model,
+      referenceNumber: model.referenceNumber,
+      priceChange: model.priceChange,
+      currentPrice: model.currentPrice
+    })),
+    coolestModels: [...priceTrends.models].sort((a, b) => a.priceChange - b.priceChange).slice(0, 5).map(model => ({
+      brand: model.brand,
+      model: model.model,
+      referenceNumber: model.referenceNumber,
+      priceChange: model.priceChange,
+      currentPrice: model.currentPrice
+    }))
+  };
+  
+  // Add market sentiment
+  if (summary.overallMarket.priceDirection === "increasing" && 
+      summary.overallMarket.increasingDemandModels > summary.overallMarket.decreasingDemandModels) {
+    summary.marketSentiment = "bullish";
+  } else if (summary.overallMarket.priceDirection === "decreasing" && 
+             summary.overallMarket.decreasingDemandModels > summary.overallMarket.increasingDemandModels) {
+    summary.marketSentiment = "bearish";
+  } else if (summary.overallMarket.priceDirection === "stable") {
+    summary.marketSentiment = "neutral";
+  } else {
+    summary.marketSentiment = "mixed";
+  }
+  
+  return summary;
+}
+
+// Identify emerging trends
+function identifyEmergingTrends(trends, priceTrends, demandTrends, cutoffDate) {
+  const emergingTrends = [];
+  
+  // Look for rapid price increases
+  const rapidPriceIncreases = priceTrends.models
+    .filter(model => model.priceChange > 10)
+    .sort((a, b) => b.priceChange - a.priceChange)
+    .slice(0, 3);
+  
+  if (rapidPriceIncreases.length > 0) {
+    emergingTrends.push({
+      type: "rapidPriceIncrease",
+      description: "Models with rapidly increasing prices",
+      models: rapidPriceIncreases.map(model => ({
+        brand: model.brand,
+        model: model.model,
+        referenceNumber: model.referenceNumber,
+        priceChange: model.priceChange,
+        currentPrice: model.currentPrice
+      }))
+    });
+  }
+  
+  // Look for increasing demand with stable prices (opportunity)
+  const demandIncreasingPriceStable = [];
+  
+  demandTrends.increasingDemand.forEach(demand => {
+    const matchingModel = priceTrends.models.find(model => 
+      model.brand === demand.brand && 
+      model.model === demand.model &&
+      model.referenceNumber === demand.referenceNumber
+    );
+    
+    if (matchingModel && Math.abs(matchingModel.priceChange) < 5) {
+      demandIncreasingPriceStable.push({
+        brand: demand.brand,
+        model: demand.model,
+        referenceNumber: demand.referenceNumber,
+        demandTrend: demand.demandTrend,
+        priceChange: matchingModel.priceChange,
+        currentPrice: matchingModel.currentPrice
+      });
+    }
+  });
+  
+  if (demandIncreasingPriceStable.length > 0) {
+    emergingTrends.push({
+      type: "demandIncreasingPriceStable",
+      description: "Models with increasing demand but stable prices (potential opportunities)",
+      models: demandIncreasingPriceStable.slice(0, 3)
+    });
+  }
+  
+  // Look for rising stars (models with both increasing price and demand)
+  const risingStars = [];
+  
+  demandTrends.increasingDemand.forEach(demand => {
+    const matchingModel = priceTrends.models.find(model => 
+      model.brand === demand.brand && 
+      model.model === demand.model &&
+      model.referenceNumber === demand.referenceNumber &&
+      model.priceChange > 5
+    );
+    
+    if (matchingModel) {
+      risingStars.push({
+        brand: demand.brand,
+        model: demand.model,
+        referenceNumber: demand.referenceNumber,
+        demandTrend: demand.demandTrend,
+        priceChange: matchingModel.priceChange,
+        currentPrice: matchingModel.currentPrice
+      });
+    }
+  });
+  
+  if (risingStars.length > 0) {
+    emergingTrends.push({
+      type: "risingStars",
+      description: "Models with both increasing prices and demand (strong momentum)",
+      models: risingStars.slice(0, 3)
+    });
+  }
+  
+  // Look for declining interest (decreasing price and demand)
+  const decliningInterest = [];
+  
+  demandTrends.decreasingDemand.forEach(demand => {
+    const matchingModel = priceTrends.models.find(model => 
+      model.brand === demand.brand && 
+      model.model === demand.model &&
+      model.referenceNumber === demand.referenceNumber &&
+      model.priceChange < -5
+    );
+    
+    if (matchingModel) {
+      decliningInterest.push({
+        brand: demand.brand,
+        model: demand.model,
+        referenceNumber: demand.referenceNumber,
+        demandTrend: demand.demandTrend,
+        priceChange: matchingModel.priceChange,
+        currentPrice: matchingModel.currentPrice
+      });
+    }
+  });
+  
+  if (decliningInterest.length > 0) {
+    emergingTrends.push({
+      type: "decliningInterest",
+      description: "Models with both decreasing prices and demand (losing appeal)",
+      models: decliningInterest.slice(0, 3)
+    });
+  }
+  
+  // Identify potential brand trends
+  const brandTrends = priceTrends.brands
+    .filter(brand => Math.abs(brand.averagePriceChange) > 5)
+    .slice(0, 3);
+  
+  if (brandTrends.length > 0) {
+    emergingTrends.push({
+      type: "brandTrends",
+      description: "Brands showing significant market movement",
+      brands: brandTrends.map(brand => ({
+        brand: brand.brand,
+        averagePriceChange: brand.averagePriceChange,
+        trendDirection: brand.trendDirection,
+        modelCount: brand.modelCount
+      }))
+    });
+  }
+  
+  return emergingTrends;
+}
+
+// Generate market overview
+function generateMarketOverview(trends, cutoffDate) {
+  const modelCount = Object.keys(trends.modelTrends).length;
+  const brandCount = new Set(Object.values(trends.modelTrends).map(m => m.brand)).size;
+  
+  // Calculate average price movement
+  let totalChange = 0;
+  let modelsWithPriceData = 0;
+  
+  Object.values(trends.modelTrends).forEach(model => {
+    const history = model.priceHistory || [];
+    if (history.length < 2) return;
+    
+    // Filter history by cutoff date
+    const relevantHistory = history.filter(entry => entry.date >= cutoffDate);
+    if (relevantHistory.length < 2) return;
+    
+    // Sort by date
+    relevantHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get first and last data points
+    const firstPoint = relevantHistory[0];
+    const lastPoint = relevantHistory[relevantHistory.length - 1];
+    
+    // Calculate change
+    const priceChange = ((lastPoint.price - firstPoint.price) / firstPoint.price) * 100;
+    
+    totalChange += priceChange;
+    modelsWithPriceData++;
+  });
+  
+  const averagePriceChange = modelsWithPriceData > 0 ? 
+    Number((totalChange / modelsWithPriceData).toFixed(2)) : 0;
+  
+  // Determine market sentiment
+  let marketSentiment = "neutral";
+  if (averagePriceChange > 5) {
+    marketSentiment = "bullish";
+  } else if (averagePriceChange < -5) {
+    marketSentiment = "bearish";
+  } else if (averagePriceChange > 2) {
+    marketSentiment = "slightly bullish";
+  } else if (averagePriceChange < -2) {
+    marketSentiment = "slightly bearish";
+  }
+  
+  return {
+    trackedModels: modelCount,
+    trackedBrands: brandCount,
+    averagePriceChange: averagePriceChange,
+    marketSentiment: marketSentiment,
+    insightCount: trends.marketInsights ? trends.marketInsights.length : 0
+  };
+}
+
+// Generate brand performance
+function generateBrandPerformance(trends, cutoffDate) {
+  const brandData = {};
+  
+  // Calculate brand-level metrics
+  Object.entries(trends.modelTrends).forEach(([key, model]) => {
+    const brand = model.brand;
+    
+    if (!brandData[brand]) {
+      brandData[brand] = {
+        modelCount: 0,
+        priceChanges: [],
+        totalPriceChange: 0,
+        modelsWithPriceData: 0
+      };
+    }
+    
+    brandData[brand].modelCount++;
+    
+    const history = model.priceHistory || [];
+    if (history.length < 2) return;
+    
+    // Filter history by cutoff date
+    const relevantHistory = history.filter(entry => entry.date >= cutoffDate);
+    if (relevantHistory.length < 2) return;
+    
+    // Sort by date
+    relevantHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get first and last data points
+    const firstPoint = relevantHistory[0];
+    const lastPoint = relevantHistory[relevantHistory.length - 1];
+    
+    // Calculate change
+    const priceChange = ((lastPoint.price - firstPoint.price) / firstPoint.price) * 100;
+    
+    brandData[brand].priceChanges.push(priceChange);
+    brandData[brand].totalPriceChange += priceChange;
+    brandData[brand].modelsWithPriceData++;
+  });
+  
+  // Format brand performance data
+  const brandPerformance = [];
+  
+  Object.entries(brandData).forEach(([brand, data]) => {
+    const averagePriceChange = data.modelsWithPriceData > 0 ? 
+      Number((data.totalPriceChange / data.modelsWithPriceData).toFixed(2)) : 0;
+      
+    let trendDirection = "stable";
+    if (averagePriceChange > 3) trendDirection = "increasing";
+    if (averagePriceChange < -3) trendDirection = "decreasing";
+    
+    brandPerformance.push({
+      brand: brand,
+      modelCount: data.modelCount,
+      modelsWithData: data.modelsWithPriceData,
+      averagePriceChange: averagePriceChange,
+      trendDirection: trendDirection,
+      // Calculate volatility (standard deviation of model price changes)
+      volatility: data.priceChanges.length > 1 ? 
+        Number(calculateStandardDeviation(data.priceChanges).toFixed(2)) : 0
+    });
+  });
+  
+  // Sort by average price change (highest first)
+  return brandPerformance.sort((a, b) => b.averagePriceChange - a.averagePriceChange);
+}
+
+// Find hottest models
+function findHottestModels(trends, cutoffDate, count) {
+  const modelPerformance = [];
+  
+  Object.entries(trends.modelTrends).forEach(([key, model]) => {
+    const history = model.priceHistory || [];
+    if (history.length < 2) return;
+    
+    // Filter history by cutoff date
+    const relevantHistory = history.filter(entry => entry.date >= cutoffDate);
+    if (relevantHistory.length < 2) return;
+    
+    // Sort by date
+    relevantHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get first and last data points
+    const firstPoint = relevantHistory[0];
+    const lastPoint = relevantHistory[relevantHistory.length - 1];
+    
+    // Calculate change
+    const priceChange = ((lastPoint.price - firstPoint.price) / firstPoint.price) * 100;
+    
+    // Check demand trend if available
+    let demandTrend = "unknown";
+    
+    const indicators = model.demandIndicators || [];
+    if (indicators.length > 0) {
+      // Sort by date, newest first
+      const sortedIndicators = [...indicators].sort((a, b) => new Date(b.date) - new Date(a.date));
+      const latest = sortedIndicators[0];
+      
+      if (latest.availability) {
+        if (latest.availability === "very low" || latest.availability === "low") {
+          demandTrend = "high";
+        } else if (latest.availability === "high" || latest.availability === "very high") {
+          demandTrend = "low";
+        } else {
+          demandTrend = "moderate";
+        }
+      }
+    }
+    
+    modelPerformance.push({
+      brand: model.brand,
+      model: model.model,
+      referenceNumber: model.referenceNumber,
+      currentPrice: lastPoint.price,
+      priceChange: Number(priceChange.toFixed(2)),
+      demandTrend: demandTrend
+    });
+  });
+  
+  // Sort by price change (highest first) and return top N
+  return modelPerformance
+    .sort((a, b) => b.priceChange - a.priceChange)
+    .slice(0, count);
+}
+
+// Find cooling models
+function findCoolingModels(trends, cutoffDate, count) {
+  const modelPerformance = [];
+  
+  Object.entries(trends.modelTrends).forEach(([key, model]) => {
+    const history = model.priceHistory || [];
+    if (history.length < 2) return;
+    
+    // Filter history by cutoff date
+    const relevantHistory = history.filter(entry => entry.date >= cutoffDate);
+    if (relevantHistory.length < 2) return;
+    
+    // Sort by date
+    relevantHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get first and last data points
+    const firstPoint = relevantHistory[0];
+    const lastPoint = relevantHistory[relevantHistory.length - 1];
+    
+    // Calculate change
+    const priceChange = ((lastPoint.price - firstPoint.price) / firstPoint.price) * 100;
+    
+    // Only include models with negative price change
+    if (priceChange >= 0) return;
+    
+    modelPerformance.push({
+      brand: model.brand,
+      model: model.model,
+      referenceNumber: model.referenceNumber,
+      currentPrice: lastPoint.price,
+      priceChange: Number(priceChange.toFixed(2))
+    });
+  });
+  
+  // Sort by price change (lowest first) and return top N
+  return modelPerformance
+    .sort((a, b) => a.priceChange - b.priceChange)
+    .slice(0, count);
+}
+
+// Generate availability insights
+function generateAvailabilityInsights(trends, cutoffDate) {
+  const availabilityData = {
+    hardToFind: [],
+    becomingRarer: [],
+    increasingAvailability: []
+  };
+  
+  Object.entries(trends.modelTrends).forEach(([key, model]) => {
+    const indicators = model.demandIndicators || [];
+    if (indicators.length === 0) return;
+    
+    // Filter by cutoff date
+    const relevantIndicators = indicators.filter(entry => entry.date >= cutoffDate);
+    if (relevantIndicators.length === 0) return;
+    
+    // Sort by date
+    relevantIndicators.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get latest indicator
+    const latest = relevantIndicators[relevantIndicators.length - 1];
+    
+    // Check if hard to find
+    if (latest.availability === "very low" || latest.availability === "low" ||
+        latest.waitlistLength > 20 || latest.waitlistTime > 12) {
+      availabilityData.hardToFind.push({
+        brand: model.brand,
+        model: model.model,
+        referenceNumber: model.referenceNumber,
+        availability: latest.availability,
+        waitlistLength: latest.waitlistLength,
+        waitlistTime: latest.waitlistTime
+      });
+    }
+    
+    // Check for changing availability (need at least 2 data points)
+    if (relevantIndicators.length >= 2) {
+      const first = relevantIndicators[0];
+      
+      // Check availability trend
+      if (first.availability && latest.availability) {
+        const availabilityValues = {
+          "very high": 5,
+          "high": 4,
+          "medium": 3,
+          "low": 2,
+          "very low": 1
+        };
+        
+        if (availabilityValues[first.availability] && availabilityValues[latest.availability]) {
+          const firstValue = availabilityValues[first.availability];
+          const lastValue = availabilityValues[latest.availability];
+          
+          if (lastValue < firstValue) {
+            // Becoming rarer
+            availabilityData.becomingRarer.push({
+              brand: model.brand,
+              model: model.model,
+              referenceNumber: model.referenceNumber,
+              initialAvailability: first.availability,
+              currentAvailability: latest.availability
+            });
+          } else if (lastValue > firstValue) {
+            // Increasing availability
+            availabilityData.increasingAvailability.push({
+              brand: model.brand,
+              model: model.model,
+              referenceNumber: model.referenceNumber,
+              initialAvailability: first.availability,
+              currentAvailability: latest.availability
+            });
+          }
+        }
+      }
+      
+      // Check waitlist trend
+      if (first.waitlistTime && latest.waitlistTime && latest.waitlistTime > first.waitlistTime * 1.25) {
+        // Waitlist increasing significantly
+        availabilityData.becomingRarer.push({
+          brand: model.brand,
+          model: model.model,
+          referenceNumber: model.referenceNumber,
+          initialWaitlist: first.waitlistTime,
+          currentWaitlist: latest.waitlistTime,
+          unit: "months"
+        });
+      }
+    }
+  });
+  
+  // Sort each category by brand and model
+  const sortByBrandModel = (a, b) => {
+    if (a.brand === b.brand) {
+      return a.model.localeCompare(b.model);
+    }
+    return a.brand.localeCompare(b.brand);
+  };
+  
+  availabilityData.hardToFind.sort(sortByBrandModel);
+  availabilityData.becomingRarer.sort(sortByBrandModel);
+  availabilityData.increasingAvailability.sort(sortByBrandModel);
+  
+  return availabilityData;
+}
+
+// Generate auction performance
+function generateAuctionPerformance(trends, cutoffDate) {
+  const auctionData = {
+    recentResults: [],
+    averagePremiums: {}
+  };
+  
+  // Collect recent auction results
+  Object.entries(trends.modelTrends).forEach(([key, model]) => {
+    const auctionResults = model.auctionResults || [];
+    if (auctionResults.length === 0) return;
+    
+    // Filter by cutoff date
+    const relevantResults = auctionResults.filter(entry => entry.date >= cutoffDate);
+    if (relevantResults.length === 0) return;
+    
+    // Add to recent results
+    relevantResults.forEach(result => {
+      auctionData.recentResults.push({
+        brand: model.brand,
+        model: model.model,
+        referenceNumber: model.referenceNumber,
+        price: result.price,
+        auctionHouse: result.auctionHouse,
+        date: result.date,
+        estimatedRange: result.estimatedRange,
+        condition: result.condition
+      });
+    });
+    
+    // Calculate auction premium if retail price is available
+    const history = model.priceHistory || [];
+    if (history.length > 0) {
+      // Get retail prices from history
+      const retailPrices = history
+        .filter(h => h.retailPrice !== null && h.date >= cutoffDate)
+        .map(h => h.retailPrice);
+      
+      if (retailPrices.length > 0) {
+        // Use average retail price
+        const avgRetailPrice = retailPrices.reduce((sum, price) => sum + price, 0) / retailPrices.length;
+        
+        // Calculate premium for each auction result
+        const premiums = relevantResults.map(result => ((result.price / avgRetailPrice) - 1) * 100);
+        
+        if (premiums.length > 0) {
+          const avgPremium = premiums.reduce((sum, premium) => sum + premium, 0) / premiums.length;
+          
+          // Add to average premiums
+          const brandModelKey = `${model.brand} ${model.model}${model.referenceNumber ? ` (${model.referenceNumber})` : ''}`;
+          auctionData.averagePremiums[brandModelKey] = {
+            brand: model.brand,
+            model: model.model,
+            referenceNumber: model.referenceNumber,
+            averagePremium: Number(avgPremium.toFixed(2)),
+            auctionResults: relevantResults.length,
+            averageRetailPrice: avgRetailPrice
+          };
+        }
+      }
+    }
+  });
+  
+  // Sort recent results by date (newest first)
+  auctionData.recentResults.sort((a, b) => new Date(b.date) - new Date(a.date));
+  
+  // Convert average premiums to array and sort by premium (highest first)
+  auctionData.sortedPremiums = Object.values(auctionData.averagePremiums)
+    .sort((a, b) => b.averagePremium - a.averagePremium);
+  
+  // Remove the object version to clean up the output
+  delete auctionData.averagePremiums;
+  
+  return auctionData;
+}
+
+// Generate investment opportunities
+function generateInvestmentOpportunities(trends, cutoffDate) {
+  const opportunities = {
+    risingStars: [],
+    undervalued: [],
+    potentialPeaked: []
+  };
+  
+  // Process each model
+  Object.entries(trends.modelTrends).forEach(([key, model]) => {
+    const priceHistory = model.priceHistory || [];
+    const demandIndicators = model.demandIndicators || [];
+    
+    if (priceHistory.length < 2) return;
+    
+    // Filter history by cutoff date
+    const relevantHistory = priceHistory.filter(entry => entry.date >= cutoffDate);
+    if (relevantHistory.length < 2) return;
+    
+    // Sort price history by date
+    relevantHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get first and last price points
+    const firstPrice = relevantHistory[0];
+    const lastPrice = relevantHistory[relevantHistory.length - 1];
+    
+    // Calculate price change
+    const priceChange = ((lastPrice.price - firstPrice.price) / firstPrice.price) * 100;
+    
+    // Rising stars: positive trend with increasing demand
+    if (priceChange > 10 && demandIndicators.length > 0) {
+      // Sort demand indicators by date, newest first
+      const sortedIndicators = [...demandIndicators]
+        .filter(entry => entry.date >= cutoffDate)
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      
+      if (sortedIndicators.length > 0) {
+        const latest = sortedIndicators[0];
+        
+        // Check for high demand indicators
+        if ((latest.availability === "low" || latest.availability === "very low") ||
+            (latest.waitlistLength > 10 || latest.waitlistTime > 6)) {
+          opportunities.risingStars.push({
+            brand: model.brand,
+            model: model.model,
+            referenceNumber: model.referenceNumber,
+            currentPrice: lastPrice.price,
+            priceChange: Number(priceChange.toFixed(2)),
+            demand: latest.availability || `Waitlist: ${latest.waitlistTime || latest.waitlistLength || "Yes"}`,
+            rationale: "Strong price momentum with high demand indicators"
+          });
+        }
+      }
+    }
+    
+    // Undervalued: stable/declining price but increasing demand
+    if (priceChange < 5 && demandIndicators.length >= 2) {
+      // Sort demand indicators by date
+      const sortedIndicators = [...demandIndicators]
+        .filter(entry => entry.date >= cutoffDate)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      if (sortedIndicators.length >= 2) {
+        const firstDemand = sortedIndicators[0];
+        const lastDemand = sortedIndicators[sortedIndicators.length - 1];
+        
+        // Check for increasing demand
+        let demandIncreasing = false;
+        
+        if (firstDemand.availability && lastDemand.availability) {
+          const availabilityValues = {
+            "very high": 5, "high": 4, "medium": 3, "low": 2, "very low": 1
+          };
+          
+          if (availabilityValues[firstDemand.availability] > availabilityValues[lastDemand.availability]) {
+            demandIncreasing = true;
+          }
+        }
+        
+        if (firstDemand.waitlistTime && lastDemand.waitlistTime && 
+            lastDemand.waitlistTime > firstDemand.waitlistTime) {
+          demandIncreasing = true;
+        }
+        
+        if (firstDemand.waitlistLength && lastDemand.waitlistLength && 
+            lastDemand.waitlistLength > firstDemand.waitlistLength) {
+          demandIncreasing = true;
+        }
+        
+        if (demandIncreasing) {
+          opportunities.undervalued.push({
+            brand: model.brand,
+            model: model.model,
+            referenceNumber: model.referenceNumber,
+            currentPrice: lastPrice.price,
+            priceChange: Number(priceChange.toFixed(2)),
+            demand: lastDemand.availability || `Waitlist: ${lastDemand.waitlistTime || lastDemand.waitlistLength || "Yes"}`,
+            rationale: "Stable or declining price despite increasing demand indicators"
+          });
+        }
+      }
+    }
+    
+    // Potential peaked: high price increase but demand cooling
+    if (priceChange > 20 && demandIndicators.length >= 2) {
+      // Sort demand indicators by date
+      const sortedIndicators = [...demandIndicators]
+        .filter(entry => entry.date >= cutoffDate)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      if (sortedIndicators.length >= 2) {
+        const firstDemand = sortedIndicators[0];
+        const lastDemand = sortedIndicators[sortedIndicators.length - 1];
+        
+        // Check for decreasing demand
+        let demandDecreasing = false;
+        
+        if (firstDemand.availability && lastDemand.availability) {
+          const availabilityValues = {
+            "very high": 5, "high": 4, "medium": 3, "low": 2, "very low": 1
+          };
+          
+          if (availabilityValues[firstDemand.availability] < availabilityValues[lastDemand.availability]) {
+            demandDecreasing = true;
+          }
+        }
+        
+        if (firstDemand.waitlistTime && lastDemand.waitlistTime && 
+            lastDemand.waitlistTime < firstDemand.waitlistTime) {
+          demandDecreasing = true;
+        }
+        
+        if (firstDemand.waitlistLength && lastDemand.waitlistLength && 
+            lastDemand.waitlistLength < firstDemand.waitlistLength) {
+          demandDecreasing = true;
+        }
+        
+        if (demandDecreasing) {
+          opportunities.potentialPeaked.push({
+            brand: model.brand,
+            model: model.model,
+            referenceNumber: model.referenceNumber,
+            currentPrice: lastPrice.price,
+            priceChange: Number(priceChange.toFixed(2)),
+            demand: lastDemand.availability || `Waitlist: ${lastDemand.waitlistTime || lastDemand.waitlistLength || "Yes"}`,
+            rationale: "Significant price increase while demand indicators are cooling"
+          });
+        }
+      }
+    }
+  });
+  
+  // Sort each category by relevant metrics
+  opportunities.risingStars.sort((a, b) => b.priceChange - a.priceChange);
+  opportunities.undervalued.sort((a, b) => {
+    // Sort by demand primarily (convert text to a numeric value)
+    const getDemandValue = demand => {
+      if (demand === "very low") return 5;
+      if (demand === "low") return 4;
+      if (demand === "medium") return 3;
+      if (demand === "high") return 2;
+      if (demand === "very high") return 1;
+      return 3; // Default for waitlist or unknown
+    };
+    
+    const aDemand = getDemandValue(a.demand);
+    const bDemand = getDemandValue(b.demand);
+    
+    if (aDemand !== bDemand) return aDemand - bDemand;
+    
+    // Secondary sort by price change (lowest first, as we're looking for undervalued)
+    return a.priceChange - b.priceChange;
+  });
+  
+  opportunities.potentialPeaked.sort((a, b) => b.priceChange - a.priceChange);
+  
+  return opportunities;
+}
+
+// Calculate standard deviation helper
+function calculateStandardDeviation(values) {
+  const n = values.length;
+  if (n === 0) return 0;
+  
+  const mean = values.reduce((sum, value) => sum + value, 0) / n;
+  const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / n;
+  
+  return Math.sqrt(variance);
+}
+
+      
