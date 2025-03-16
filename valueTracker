@@ -1,0 +1,519 @@
+// Collection Value Tracker
+// Tracks the value of a user's watch collection over time
+
+// Validate configuration
+if (!ai.config.action) {
+  throw new Error("Action is required (add, update, remove, track, or report)");
+}
+
+// Initialize collections database if it doesn't exist
+if (!ai.vars.global.watchCollections) {
+  ai.vars.global.watchCollections = {
+    watches: [],
+    valuationHistory: [],
+    lastValuation: null
+  };
+}
+
+const outputVarName = ai.config.outputVarName || 'collectionTracker';
+const collection = ai.vars.global.watchCollections;
+const now = new Date();
+const todayFormatted = now.toISOString().split('T')[0];
+
+// Process based on action type
+switch (ai.config.action.toLowerCase()) {
+  case 'add':
+    // Add a new watch to the collection
+    if (!ai.config.brand || !ai.config.model) {
+      throw new Error("Brand and model are required to add a watch");
+    }
+    
+    const watchId = Date.now().toString();
+    const newWatch = {
+      id: watchId,
+      brand: ai.config.brand,
+      model: ai.config.model,
+      referenceNumber: ai.config.referenceNumber || null,
+      purchaseDate: ai.config.purchaseDate || todayFormatted,
+      purchasePrice: ai.config.purchasePrice ? Number(ai.config.purchasePrice) : null,
+      currentValue: ai.config.currentValue ? Number(ai.config.currentValue) : ai.config.purchasePrice ? Number(ai.config.purchasePrice) : null,
+      condition: ai.config.condition || "Excellent",
+      box: ai.config.hasBox || false,
+      papers: ai.config.hasPapers || false,
+      serviceHistory: ai.config.serviceHistory || null,
+      insuranceValue: ai.config.insuranceValue ? Number(ai.config.insuranceValue) : null,
+      notes: ai.config.notes || "",
+      valuation: {
+        lastUpdated: todayFormatted,
+        history: [{
+          date: todayFormatted,
+          value: ai.config.currentValue ? Number(ai.config.currentValue) : ai.config.purchasePrice ? Number(ai.config.purchasePrice) : 0
+        }]
+      }
+    };
+    
+    collection.watches.push(newWatch);
+    console.log(`Added watch: ${ai.config.brand} ${ai.config.model} to collection`);
+    
+    ai.vars[outputVarName] = {
+      action: "add",
+      watch: newWatch,
+      success: true
+    };
+    break;
+
+  case 'update':
+    // Update watch information
+    if (!ai.config.watchId) {
+      throw new Error("Watch ID is required to update a watch");
+    }
+    
+    const watchIndex = collection.watches.findIndex(w => w.id === ai.config.watchId);
+    if (watchIndex === -1) {
+      throw new Error(`Watch with ID ${ai.config.watchId} not found`);
+    }
+    
+    const watch = collection.watches[watchIndex];
+    
+    // Update basic properties if provided
+    if (ai.config.brand) watch.brand = ai.config.brand;
+    if (ai.config.model) watch.model = ai.config.model;
+    if (ai.config.referenceNumber) watch.referenceNumber = ai.config.referenceNumber;
+    if (ai.config.condition) watch.condition = ai.config.condition;
+    if (ai.config.hasBox !== undefined) watch.box = ai.config.hasBox;
+    if (ai.config.hasPapers !== undefined) watch.papers = ai.config.hasPapers;
+    if (ai.config.serviceHistory) watch.serviceHistory = ai.config.serviceHistory;
+    if (ai.config.insuranceValue) watch.insuranceValue = Number(ai.config.insuranceValue);
+    if (ai.config.notes) watch.notes = ai.config.notes;
+    if (ai.config.purchaseDate) watch.purchaseDate = ai.config.purchaseDate;
+    if (ai.config.purchasePrice) watch.purchasePrice = Number(ai.config.purchasePrice);
+    
+    // Update current value if provided
+    if (ai.config.currentValue) {
+      const newValue = Number(ai.config.currentValue);
+      watch.currentValue = newValue;
+      
+      // Add to valuation history if value changed
+      const lastValuation = watch.valuation.history[watch.valuation.history.length - 1];
+      if (!lastValuation || lastValuation.value !== newValue) {
+        watch.valuation.history.push({
+          date: todayFormatted,
+          value: newValue
+        });
+        watch.valuation.lastUpdated = todayFormatted;
+      }
+    }
+    
+    collection.watches[watchIndex] = watch;
+    console.log(`Updated watch: ${watch.brand} ${watch.model}`);
+    
+    ai.vars[outputVarName] = {
+      action: "update",
+      watch: watch,
+      success: true
+    };
+    break;
+
+  case 'remove':
+    // Remove a watch from the collection
+    if (!ai.config.watchId) {
+      throw new Error("Watch ID is required to remove a watch");
+    }
+    
+    const removeIndex = collection.watches.findIndex(w => w.id === ai.config.watchId);
+    if (removeIndex === -1) {
+      throw new Error(`Watch with ID ${ai.config.watchId} not found`);
+    }
+    
+    const removedWatch = collection.watches[removeIndex];
+    collection.watches.splice(removeIndex, 1);
+    
+    console.log(`Removed watch: ${removedWatch.brand} ${removedWatch.model} from collection`);
+    
+    ai.vars[outputVarName] = {
+      action: "remove",
+      watch: removedWatch,
+      success: true
+    };
+    break;
+
+  case 'track':
+    // Create a new valuation record for the entire collection
+    let totalValue = 0;
+    let appreciationValue = 0;
+    
+    // Update current values if provided in bulk
+    if (ai.config.watchValues && typeof ai.config.watchValues === 'object') {
+      Object.entries(ai.config.watchValues).forEach(([watchId, value]) => {
+        const watchIndex = collection.watches.findIndex(w => w.id === watchId);
+        if (watchIndex !== -1) {
+          const watch = collection.watches[watchIndex];
+          const newValue = Number(value);
+          
+          // Update the watch's current value
+          watch.currentValue = newValue;
+          watch.valuation.history.push({
+            date: todayFormatted,
+            value: newValue
+          });
+          watch.valuation.lastUpdated = todayFormatted;
+          
+          collection.watches[watchIndex] = watch;
+        }
+      });
+    }
+    
+    // Calculate total collection value and appreciation
+    collection.watches.forEach(watch => {
+      if (watch.currentValue) {
+        totalValue += watch.currentValue;
+        if (watch.purchasePrice) {
+          appreciationValue += (watch.currentValue - watch.purchasePrice);
+        }
+      }
+    });
+    
+    // Add to collection valuation history
+    collection.valuationHistory.push({
+      date: todayFormatted,
+      totalValue: totalValue,
+      appreciationValue: appreciationValue,
+      watchCount: collection.watches.length
+    });
+    
+    collection.lastValuation = {
+      date: todayFormatted,
+      totalValue: totalValue,
+      appreciationValue: appreciationValue,
+      appreciationPercent: calculateAppreciationPercent(collection.watches),
+      watchCount: collection.watches.length
+    };
+    
+    console.log(`Tracked collection value: ${totalValue} (${collection.watches.length} watches)`);
+    
+    ai.vars[outputVarName] = {
+      action: "track",
+      valuation: collection.lastValuation,
+      success: true
+    };
+    break;
+
+  case 'report':
+    // Generate a comprehensive collection report
+    if (collection.watches.length === 0) {
+      ai.vars[outputVarName] = {
+        action: "report",
+        success: false,
+        message: "No watches in collection to report on"
+      };
+      return;
+    }
+    
+    // If we haven't done a valuation recently, do one now
+    if (!collection.lastValuation || collection.lastValuation.date !== todayFormatted) {
+      let totalValue = 0;
+      let appreciationValue = 0;
+      
+      collection.watches.forEach(watch => {
+        if (watch.currentValue) {
+          totalValue += watch.currentValue;
+          if (watch.purchasePrice) {
+            appreciationValue += (watch.currentValue - watch.purchasePrice);
+          }
+        }
+      });
+      
+      collection.lastValuation = {
+        date: todayFormatted,
+        totalValue: totalValue,
+        appreciationValue: appreciationValue,
+        appreciationPercent: calculateAppreciationPercent(collection.watches),
+        watchCount: collection.watches.length
+      };
+    }
+    
+    // Generate performance metrics
+    const performanceByBrand = calculatePerformanceByBrand(collection.watches);
+    const bestPerformers = findBestPerformers(collection.watches, 3);
+    const worstPerformers = findWorstPerformers(collection.watches, 3);
+    
+    // Generate collection analysis
+    const brandDistribution = calculateBrandDistribution(collection.watches);
+    const valueDistribution = calculateValueDistribution(collection.watches);
+    const acquisitionTimeline = generateAcquisitionTimeline(collection.watches);
+    const valueTimeline = generateValueTimeline(collection.valuationHistory);
+    
+    // Create report
+    const report = {
+      summary: {
+        watchCount: collection.watches.length,
+        totalValue: collection.lastValuation.totalValue,
+        totalInvested: calculateTotalInvested(collection.watches),
+        totalAppreciation: collection.lastValuation.appreciationValue,
+        appreciationPercent: collection.lastValuation.appreciationPercent,
+        averageHoldingPeriod: calculateAverageHoldingPeriod(collection.watches),
+        insuranceValue: calculateInsuranceValue(collection.watches)
+      },
+      performance: {
+        byBrand: performanceByBrand,
+        bestPerformers: bestPerformers,
+        worstPerformers: worstPerformers
+      },
+      analysis: {
+        brandDistribution: brandDistribution,
+        valueDistribution: valueDistribution,
+        acquisitionTimeline: acquisitionTimeline,
+        valueTimeline: valueTimeline
+      },
+      lastUpdated: todayFormatted
+    };
+    
+    console.log(`Generated collection report for ${collection.watches.length} watches`);
+    
+    ai.vars[outputVarName] = {
+      action: "report",
+      report: report,
+      success: true
+    };
+    break;
+
+  default:
+    throw new Error(`Unknown action: ${ai.config.action}. Use add, update, remove, track, or report`);
+}
+
+// Save the updated collection
+ai.vars.global.watchCollections = collection;
+
+// Helper functions
+
+// Calculate total investment across all watches
+function calculateTotalInvested(watches) {
+  return watches.reduce((total, watch) => {
+    return total + (watch.purchasePrice || 0);
+  }, 0);
+}
+
+// Calculate average appreciation percentage
+function calculateAppreciationPercent(watches) {
+  let totalPercent = 0;
+  let count = 0;
+  
+  watches.forEach(watch => {
+    if (watch.purchasePrice && watch.currentValue && watch.purchasePrice > 0) {
+      const percent = ((watch.currentValue - watch.purchasePrice) / watch.purchasePrice) * 100;
+      totalPercent += percent;
+      count++;
+    }
+  });
+  
+  return count > 0 ? Number((totalPercent / count).toFixed(2)) : 0;
+}
+
+// Calculate performance metrics by brand
+function calculatePerformanceByBrand(watches) {
+  const brands = {};
+  
+  watches.forEach(watch => {
+    if (!watch.brand) return;
+    
+    if (!brands[watch.brand]) {
+      brands[watch.brand] = {
+        count: 0,
+        totalValue: 0,
+        totalInvested: 0,
+        appreciationValue: 0,
+        appreciationPercent: 0
+      };
+    }
+    
+    brands[watch.brand].count++;
+    brands[watch.brand].totalValue += (watch.currentValue || 0);
+    brands[watch.brand].totalInvested += (watch.purchasePrice || 0);
+    
+    if (watch.purchasePrice && watch.currentValue) {
+      brands[watch.brand].appreciationValue += (watch.currentValue - watch.purchasePrice);
+    }
+  });
+  
+  // Calculate appreciation percentages
+  Object.keys(brands).forEach(brand => {
+    if (brands[brand].totalInvested > 0) {
+      brands[brand].appreciationPercent = Number(((brands[brand].appreciationValue / brands[brand].totalInvested) * 100).toFixed(2));
+    }
+  });
+  
+  return brands;
+}
+
+// Find best performing watches
+function findBestPerformers(watches, count) {
+  const watchesWithPerformance = watches
+    .filter(watch => watch.purchasePrice && watch.currentValue && watch.purchasePrice > 0)
+    .map(watch => {
+      const appreciationPercent = ((watch.currentValue - watch.purchasePrice) / watch.purchasePrice) * 100;
+      return {
+        id: watch.id,
+        brand: watch.brand,
+        model: watch.model,
+        referenceNumber: watch.referenceNumber,
+        purchasePrice: watch.purchasePrice,
+        currentValue: watch.currentValue,
+        appreciationValue: watch.currentValue - watch.purchasePrice,
+        appreciationPercent: Number(appreciationPercent.toFixed(2))
+      };
+    });
+  
+  return watchesWithPerformance
+    .sort((a, b) => b.appreciationPercent - a.appreciationPercent)
+    .slice(0, count);
+}
+
+// Find worst performing watches
+function findWorstPerformers(watches, count) {
+  const watchesWithPerformance = watches
+    .filter(watch => watch.purchasePrice && watch.currentValue && watch.purchasePrice > 0)
+    .map(watch => {
+      const appreciationPercent = ((watch.currentValue - watch.purchasePrice) / watch.purchasePrice) * 100;
+      return {
+        id: watch.id,
+        brand: watch.brand,
+        model: watch.model,
+        referenceNumber: watch.referenceNumber,
+        purchasePrice: watch.purchasePrice,
+        currentValue: watch.currentValue,
+        appreciationValue: watch.currentValue - watch.purchasePrice,
+        appreciationPercent: Number(appreciationPercent.toFixed(2))
+      };
+    });
+  
+  return watchesWithPerformance
+    .sort((a, b) => a.appreciationPercent - b.appreciationPercent)
+    .slice(0, count);
+}
+
+// Calculate brand distribution
+function calculateBrandDistribution(watches) {
+  const brands = {};
+  
+  watches.forEach(watch => {
+    if (!watch.brand) return;
+    
+    if (!brands[watch.brand]) {
+      brands[watch.brand] = {
+        count: 0,
+        totalValue: 0,
+        percentage: 0
+      };
+    }
+    
+    brands[watch.brand].count++;
+    brands[watch.brand].totalValue += (watch.currentValue || 0);
+  });
+  
+  // Calculate percentages
+  const totalWatches = watches.length;
+  Object.keys(brands).forEach(brand => {
+    brands[brand].percentage = Number(((brands[brand].count / totalWatches) * 100).toFixed(2));
+  });
+  
+  return brands;
+}
+
+// Calculate value distribution
+function calculateValueDistribution(watches) {
+  const ranges = {
+    "Under $5,000": { count: 0, totalValue: 0 },
+    "$5,000 - $10,000": { count: 0, totalValue: 0 },
+    "$10,000 - $25,000": { count: 0, totalValue: 0 },
+    "$25,000 - $50,000": { count: 0, totalValue: 0 },
+    "Over $50,000": { count: 0, totalValue: 0 }
+  };
+  
+  watches.forEach(watch => {
+    const value = watch.currentValue || 0;
+    
+    if (value < 5000) {
+      ranges["Under $5,000"].count++;
+      ranges["Under $5,000"].totalValue += value;
+    } else if (value < 10000) {
+      ranges["$5,000 - $10,000"].count++;
+      ranges["$5,000 - $10,000"].totalValue += value;
+    } else if (value < 25000) {
+      ranges["$10,000 - $25,000"].count++;
+      ranges["$10,000 - $25,000"].totalValue += value;
+    } else if (value < 50000) {
+      ranges["$25,000 - $50,000"].count++;
+      ranges["$25,000 - $50,000"].totalValue += value;
+    } else {
+      ranges["Over $50,000"].count++;
+      ranges["Over $50,000"].totalValue += value;
+    }
+  });
+  
+  return ranges;
+}
+
+// Generate acquisition timeline
+function generateAcquisitionTimeline(watches) {
+  const timeline = {};
+  
+  watches.forEach(watch => {
+    if (!watch.purchaseDate) return;
+    
+    const year = watch.purchaseDate.split('-')[0];
+    
+    if (!timeline[year]) {
+      timeline[year] = {
+        count: 0,
+        totalInvested: 0,
+        watches: []
+      };
+    }
+    
+    timeline[year].count++;
+    timeline[year].totalInvested += (watch.purchasePrice || 0);
+    timeline[year].watches.push({
+      id: watch.id,
+      brand: watch.brand,
+      model: watch.model,
+      purchasePrice: watch.purchasePrice
+    });
+  });
+  
+  return timeline;
+}
+
+// Generate value timeline
+function generateValueTimeline(valuationHistory) {
+  return valuationHistory.map(entry => ({
+    date: entry.date,
+    totalValue: entry.totalValue,
+    watchCount: entry.watchCount
+  }));
+}
+
+// Calculate average holding period
+function calculateAverageHoldingPeriod(watches) {
+  let totalDays = 0;
+  let count = 0;
+  
+  watches.forEach(watch => {
+    if (!watch.purchaseDate) return;
+    
+    const purchaseDate = new Date(watch.purchaseDate);
+    const today = new Date();
+    const days = Math.floor((today - purchaseDate) / (1000 * 60 * 60 * 24));
+    
+    totalDays += days;
+    count++;
+  });
+  
+  return count > 0 ? Math.floor(totalDays / count) : 0;
+}
+
+// Calculate total insurance value
+function calculateInsuranceValue(watches) {
+  return watches.reduce((total, watch) => {
+    return total + (watch.insuranceValue || watch.currentValue || watch.purchasePrice || 0);
+  }, 0);
+}
