@@ -1,0 +1,48 @@
+This Market Trend Spotter function is a comprehensive tool for monitoring and analyzing trends in the luxury watch market. It includes:
+
+Data Collection:
+
+Price observations for specific watch models
+Auction results tracking
+Waitlist/availability information
+Market insights and observations
+
+
+Trend Analysis:
+
+Price trend detection (increasing, decreasing, stable)
+Demand trend analysis
+Brand performance metrics
+Market sentiment assessment
+
+
+Opportunity Identification:
+
+Rising stars (models with increasing prices and demand)
+Undervalued watches (high demand but stable prices)
+Potential peaked models (price increases but cooling demand)
+
+
+Market Intelligence:
+
+Availability insights (hard-to-find models, changing availability)
+Auction performance analysis
+Brand-level market performance
+Overall market sentiment indicators
+
+
+Reporting:
+
+Comprehensive market reports
+Emerging trend alerts
+Performance metrics across different timeframes
+
+
+
+The function supports three main actions:
+
+add: Add new market data points (prices, auction results, waitlist info)
+analyze: Perform trend analysis over a specified period
+report: Generate a comprehensive market report
+
+This function serves as the market intelligence component of your Luxury Watch Investment Advisor, helping collectors and investors identify trends and opportunities in the luxury watch market.
