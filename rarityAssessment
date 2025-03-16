@@ -1,0 +1,817 @@
+// Rarity Assessment Function
+// Evaluates the relative rarity of watch models based on production data and market availability
+
+// Validate required configuration
+if (!ai.config.brand) {
+  throw new Error('Watch brand is required for rarity assessment');
+}
+
+if (!ai.config.model) {
+  throw new Error('Watch model is required for rarity assessment');
+}
+
+// Initialize rarity database if it doesn't exist
+if (!ai.vars.global.rarityData) {
+  ai.vars.global.rarityData = {
+    productionData: {},
+    rarityAssessments: {}
+  };
+}
+
+const outputVarName = ai.config.outputVarName || 'rarityAssessment';
+const rarityData = ai.vars.global.rarityData;
+const now = new Date();
+const todayFormatted = now.toISOString().split('T')[0];
+
+// Determine action
+const action = ai.config.action || 'assess';
+
+// Process based on action
+switch (action.toLowerCase()) {
+  case 'update':
+    // Update production data or rarity factors
+    
+    // Create model key
+    const updateModelKey = `${ai.config.brand}|${ai.config.model}${ai.config.referenceNumber ? `|${ai.config.referenceNumber}` : ''}`;
+    
+    // Create or update model in production data
+    if (!rarityData.productionData[updateModelKey]) {
+      rarityData.productionData[updateModelKey] = {
+        brand: ai.config.brand,
+        model: ai.config.model,
+        referenceNumber: ai.config.referenceNumber || null,
+        productionYears: [],
+        estimatedProduction: null,
+        isLimitedEdition: false,
+        limitedEditionSize: null,
+        discontinuationDate: null,
+        rarityFactors: [],
+        notes: "",
+        lastUpdated: null
+      };
+    }
+    
+    // Update fields if provided
+    const data = rarityData.productionData[updateModelKey];
+    
+    if (ai.config.productionYears) {
+      data.productionYears = Array.isArray(ai.config.productionYears) ? 
+        ai.config.productionYears : [ai.config.productionYears];
+    }
+    
+    if (ai.config.estimatedProduction !== undefined) {
+      data.estimatedProduction = ai.config.estimatedProduction ? 
+        Number(ai.config.estimatedProduction) : null;
+    }
+    
+    if (ai.config.isLimitedEdition !== undefined) {
+      data.isLimitedEdition = Boolean(ai.config.isLimitedEdition);
+    }
+    
+    if (ai.config.limitedEditionSize !== undefined) {
+      data.limitedEditionSize = ai.config.limitedEditionSize ? 
+        Number(ai.config.limitedEditionSize) : null;
+    }
+    
+    if (ai.config.discontinuationDate !== undefined) {
+      data.discontinuationDate = ai.config.discontinuationDate;
+    }
+    
+    if (ai.config.addRarityFactor) {
+      // Add a new rarity factor if not already present
+      const newFactor = ai.config.rarityFactor;
+      if (newFactor && !data.rarityFactors.includes(newFactor)) {
+        data.rarityFactors.push(newFactor);
+      }
+    }
+    
+    if (ai.config.removeRarityFactor) {
+      // Remove a rarity factor
+      const factorToRemove = ai.config.rarityFactor;
+      if (factorToRemove) {
+        data.rarityFactors = data.rarityFactors.filter(factor => factor !== factorToRemove);
+      }
+    }
+    
+    if (ai.config.notes) {
+      data.notes = ai.config.notes;
+    }
+    
+    // Update lastUpdated timestamp
+    data.lastUpdated = todayFormatted;
+    
+    // Save updated data
+    rarityData.productionData[updateModelKey] = data;
+    
+    console.log(`Updated production data for ${ai.config.brand} ${ai.config.model}`);
+    
+    ai.vars[outputVarName] = {
+      action: "update",
+      model: data,
+      success: true
+    };
+    break;
+    
+  case 'assess':
+  default:
+    // Assess rarity for the specified model
+    
+    // Create model key
+    const modelKey = `${ai.config.brand}|${ai.config.model}${ai.config.referenceNumber ? `|${ai.config.referenceNumber}` : ''}`;
+    
+    // Get production data if available
+    const productionData = rarityData.productionData[modelKey] || null;
+    
+    // Get market data if available
+    let marketData = null;
+    
+    // Check if we have market trends data
+    if (ai.vars.global.marketTrends && ai.vars.global.marketTrends.modelTrends) {
+      // Create model key for market trends
+      const marketModelKey = `${ai.config.model}${ai.config.referenceNumber ? `|${ai.config.referenceNumber}` : ''}`;
+      
+      const marketModel = ai.vars.global.marketTrends.modelTrends[marketModelKey];
+      if (marketModel && marketModel.brand === ai.config.brand) {
+        marketData = {
+          priceHistory: marketModel.priceHistory || [],
+          demandIndicators: marketModel.demandIndicators || [],
+          auctionResults: marketModel.auctionResults || []
+        };
+      }
+    }
+    
+    // Get collection data if available
+    let collectionData = null;
+    
+    if (ai.vars.global.watchCollections && ai.vars.global.watchCollections.watches) {
+      const matchingWatches = ai.vars.global.watchCollections.watches.filter(watch => 
+        watch.brand === ai.config.brand && 
+        watch.model === ai.config.model &&
+        (!ai.config.referenceNumber || watch.referenceNumber === ai.config.referenceNumber)
+      );
+      
+      if (matchingWatches.length > 0) {
+        collectionData = {
+          count: matchingWatches.length,
+          watches: matchingWatches
+        };
+      }
+    }
+    
+    // Get auction and retail data for price premium calculation
+    const auctionPrices = marketData && marketData.auctionResults ? 
+      marketData.auctionResults.map(result => result.price) : [];
+    
+    const retailPrices = marketData && marketData.priceHistory ? 
+      marketData.priceHistory
+        .filter(entry => entry.retailPrice !== null)
+        .map(entry => entry.retailPrice) : [];
+    
+    // Calculate rarity score
+    const rarityScore = calculateRarityScore(
+      ai.config.brand,
+      ai.config.model,
+      ai.config.referenceNumber,
+      productionData,
+      marketData
+    );
+    
+    // Calculate market availability
+    const marketAvailability = calculateMarketAvailability(marketData);
+    
+    // Calculate price premium
+    const marketPremium = calculateMarketPremium(auctionPrices, retailPrices);
+    
+    // Determine rarity category
+    let rarityCategory = "Common";
+    if (rarityScore >= 90) rarityCategory = "Extremely Rare";
+    else if (rarityScore >= 80) rarityCategory = "Very Rare";
+    else if (rarityScore >= 70) rarityCategory = "Rare";
+    else if (rarityScore >= 60) rarityCategory = "Uncommon";
+    else if (rarityScore >= 50) rarityCategory = "Somewhat Uncommon";
+    
+    // Create assessment
+    const assessment = {
+      brand: ai.config.brand,
+      model: ai.config.model,
+      referenceNumber: ai.config.referenceNumber || null,
+      rarityScore: rarityScore,
+      rarityCategory: rarityCategory,
+      marketAvailability: marketAvailability,
+      marketPremium: marketPremium,
+      factors: []
+    };
+    
+    // Add factors that contributed to the score
+    if (productionData) {
+      if (productionData.isLimitedEdition) {
+        assessment.factors.push({
+          factor: "Limited Edition",
+          detail: productionData.limitedEditionSize ? 
+            `Limited to ${productionData.limitedEditionSize} pieces` : "Limited production run",
+          impact: "Significant"
+        });
+      }
+      
+      if (productionData.discontinuationDate) {
+        assessment.factors.push({
+          factor: "Discontinued",
+          detail: `Production ended in ${productionData.discontinuationDate}`,
+          impact: "Moderate"
+        });
+      }
+      
+      if (productionData.estimatedProduction !== null) {
+        let impactLevel = "Low";
+        if (productionData.estimatedProduction < 1000) impactLevel = "Significant";
+        else if (productionData.estimatedProduction < 5000) impactLevel = "Moderate";
+        
+        assessment.factors.push({
+          factor: "Production Volume",
+          detail: `Estimated production of ${productionData.estimatedProduction} pieces`,
+          impact: impactLevel
+        });
+      }
+      
+      // Add special rarity factors
+      productionData.rarityFactors.forEach(factor => {
+        assessment.factors.push({
+          factor: "Special Characteristic",
+          detail: factor,
+          impact: "Moderate to Significant"
+        });
+      });
+    }
+    
+    // Add market-based factors
+    if (marketAvailability.level === "Very Low" || marketAvailability.level === "Low") {
+      assessment.factors.push({
+        factor: "Market Scarcity",
+        detail: `${marketAvailability.level} market availability`,
+        impact: marketAvailability.level === "Very Low" ? "Significant" : "Moderate"
+      });
+    }
+    
+    if (marketPremium && marketPremium.premium > 30) {
+      assessment.factors.push({
+        factor: "Market Premium",
+        detail: `Commands ${marketPremium.premium}% premium over retail`,
+        impact: marketPremium.premium > 50 ? "Significant" : "Moderate"
+      });
+    }
+    
+    // Add brand rarity factor
+    const brandRarityImpact = getBrandRarityImpact(ai.config.brand);
+    if (brandRarityImpact.impact !== "Neutral") {
+      assessment.factors.push({
+        factor: "Brand Exclusivity",
+        detail: brandRarityImpact.detail,
+        impact: brandRarityImpact.impact
+      });
+    }
+    
+    // Add value retention assessment
+    assessment.valueRetention = assessValueRetention(
+      assessment.rarityScore,
+      marketPremium,
+      marketAvailability,
+      ai.config.brand
+    );
+    
+    // Add investment outlook
+    assessment.investmentOutlook = generateInvestmentOutlook(
+      assessment.rarityScore,
+      assessment.valueRetention,
+      marketData,
+      productionData
+    );
+    
+    // Save assessment to database
+    rarityData.rarityAssessments[modelKey] = {
+      ...assessment,
+      assessmentDate: todayFormatted
+    };
+    
+    console.log(`Rarity assessment completed for ${ai.config.brand} ${ai.config.model}: ${rarityScore}/100 (${rarityCategory})`);
+    
+    // Return assessment
+    ai.vars[outputVarName] = {
+      action: "assess",
+      assessment: assessment,
+      success: true
+    };
+    break;
+}
+
+// Save updated rarity data
+ai.vars.global.rarityData = rarityData;
+
+// Helper Functions
+
+// Calculate rarity score based on available data
+function calculateRarityScore(brand, model, referenceNumber, productionData, marketData) {
+  // Base score starts at 50 (average)
+  let score = 50;
+  
+  // Production data factors
+  if (productionData) {
+    // Limited edition factor
+    if (productionData.isLimitedEdition) {
+      if (productionData.limitedEditionSize) {
+        // Adjust score based on limited edition size
+        if (productionData.limitedEditionSize <= 100) score += 20;
+        else if (productionData.limitedEditionSize <= 500) score += 15;
+        else if (productionData.limitedEditionSize <= 1000) score += 10;
+        else if (productionData.limitedEditionSize <= 5000) score += 5;
+        else score += 3;
+      } else {
+        // Unknown size, but still limited
+        score += 8;
+      }
+    }
+    
+    // Production volume factor
+    if (productionData.estimatedProduction !== null) {
+      if (productionData.estimatedProduction <= 500) score += 15;
+      else if (productionData.estimatedProduction <= 1000) score += 12;
+      else if (productionData.estimatedProduction <= 5000) score += 8;
+      else if (productionData.estimatedProduction <= 10000) score += 5;
+      else if (productionData.estimatedProduction <= 25000) score += 2;
+      else if (productionData.estimatedProduction > 100000) score -= 5;
+    }
+    
+    // Discontinued factor
+    if (productionData.discontinuationDate) {
+      const discontinuationYear = parseInt(productionData.discontinuationDate);
+      const currentYear = new Date().getFullYear();
+      
+      if (!isNaN(discontinuationYear)) {
+        const yearsSinceDiscontinuation = currentYear - discontinuationYear;
+        
+        if (yearsSinceDiscontinuation >= 20) score += 10;
+        else if (yearsSinceDiscontinuation >= 10) score += 7;
+        else if (yearsSinceDiscontinuation >= 5) score += 5;
+        else if (yearsSinceDiscontinuation >= 2) score += 3;
+        else score += 1;
+      } else {
+        // Discontinued but unknown date
+        score += 5;
+      }
+    }
+    
+    // Special characteristics
+    score += Math.min(15, productionData.rarityFactors.length * 5);
+  }
+  
+  // Market data factors
+  if (marketData) {
+    // Availability indicators
+    const demandIndicators = marketData.demandIndicators || [];
+    if (demandIndicators.length > 0) {
+      // Sort by date, newest first
+      const sortedIndicators = [...demandIndicators].sort((a, b) => new Date(b.date) - new Date(a.date));
+      const latestIndicator = sortedIndicators[0];
+      
+      if (latestIndicator.availability) {
+        // Adjust score based on market availability
+        if (latestIndicator.availability === "very low") score += 12;
+        else if (latestIndicator.availability === "low") score += 8;
+        else if (latestIndicator.availability === "medium") score += 3;
+        else if (latestIndicator.availability === "high") score -= 3;
+        else if (latestIndicator.availability === "very high") score -= 8;
+      }
+      
+      if (latestIndicator.waitlistTime) {
+        // Adjust score based on waitlist time
+        if (latestIndicator.waitlistTime >= 24) score += 12;
+        else if (latestIndicator.waitlistTime >= 12) score += 9;
+        else if (latestIndicator.waitlistTime >= 6) score += 6;
+        else if (latestIndicator.waitlistTime >= 3) score += 3;
+      }
+    }
+    
+    // Auction results
+    const auctionResults = marketData.auctionResults || [];
+    if (auctionResults.length > 0) {
+      // More auction appearances might indicate less rarity
+      if (auctionResults.length >= 10) score -= 5;
+      else if (auctionResults.length >= 5) score -= 3;
+      else if (auctionResults.length <= 2) score += 2; // Very few auctions might indicate rarity
+    }
+  }
+  
+  // Brand exclusivity factor
+  const brandFactor = getBrandRarityFactor(brand);
+  score += brandFactor;
+  
+  // Model-specific adjustments
+  score += getModelRarityFactor(brand, model);
+  
+  // Cap score at 0-100
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+// Determine brand rarity factor
+function getBrandRarityFactor(brand) {
+  const brandFactors = {
+    // Ultra-high-end independent watchmakers
+    "f.p. journe": 15,
+    "philippe dufour": 20,
+    "roger smith": 20,
+    "kari voutilainen": 18,
+    "greubel forsey": 15,
+    "h. moser & cie": 12,
+    "de bethune": 12,
+    "romain gauthier": 12,
+    "laurent ferrier": 10,
+    
+    // Prestigious mainstream brands
+    "patek philippe": 8,
+    "audemars piguet": 8,
+    "a. lange & söhne": 10,
+    "vacheron constantin": 7,
+    "richard mille": 10,
+    "jaeger-lecoultre": 5,
+    
+    // Luxury mainstream brands
+    "rolex": 3,
+    "omega": 0,
+    "iwc": 0,
+    "panerai": 0,
+    "cartier": 0,
+    "zenith": 0,
+    "blancpain": 2,
+    "breguet": 5,
+    
+    // Volume luxury brands
+    "tudor": -2,
+    "tag heuer": -5,
+    "longines": -5,
+    "breitling": -3,
+    "grand seiko": 0
+  };
+  
+  // Normalize brand name to lowercase for matching
+  const normalizedBrand = brand.toLowerCase();
+  
+  // Return the factor or default to 0 if brand not found
+  return brandFactors[normalizedBrand] || 0;
+}
+
+// Get brand rarity impact text
+function getBrandRarityImpact(brand) {
+  const normalizedBrand = brand.toLowerCase();
+  
+  // Define impact thresholds
+  const highImpactBrands = ["f.p. journe", "philippe dufour", "roger smith", "kari voutilainen", 
+                           "greubel forsey", "richard mille"];
+  const moderateImpactBrands = ["patek philippe", "audemars piguet", "a. lange & söhne", 
+                               "vacheron constantin", "h. moser & cie", "de bethune"];
+  const lowImpactBrands = ["breguet", "jaeger-lecoultre", "blancpain"];
+  const negativeImpactBrands = ["tag heuer", "longines", "tudor"];
+  
+  if (highImpactBrands.includes(normalizedBrand)) {
+    return {
+      impact: "Significant",
+      detail: "Ultra-high-end independent watchmaker with very limited production"
+    };
+  } else if (moderateImpactBrands.includes(normalizedBrand)) {
+    return {
+      impact: "Moderate",
+      detail: "Prestigious brand with limited production"
+    };
+  } else if (lowImpactBrands.includes(normalizedBrand)) {
+    return {
+      impact: "Slight",
+      detail: "Respected brand with relatively limited production"
+    };
+  } else if (negativeImpactBrands.includes(normalizedBrand)) {
+    return {
+      impact: "Slight Negative",
+      detail: "Brand with higher production volumes"
+    };
+  }
+  
+  return {
+    impact: "Neutral",
+    detail: "Brand reputation has neutral impact on rarity"
+  };
+}
+
+// Determine model-specific rarity factor
+function getModelRarityFactor(brand, model) {
+  // Normalize brand and model
+  const normalizedBrand = brand.toLowerCase();
+  const normalizedModel = model.toLowerCase();
+  
+  // Special cases for iconic/rare models
+  const specialModels = {
+    "rolex": {
+      "daytona": 5,
+      "submariner": 2,
+      "gmt-master": 2,
+      "day-date": 3,
+      "milgauss": 4,
+      "paul newman": 15
+    },
+    "patek philippe": {
+      "nautilus": 8,
+      "aquanaut": 7,
+      "calatrava": 3,
+      "perpetual calendar": 7,
+      "minute repeater": 15,
+      "grand complication": 15
+    },
+    "audemars piguet": {
+      "royal oak": 5,
+      "royal oak offshore": 3,
+      "royal oak concept": 10,
+      "code 11.59": 2
+    },
+    "omega": {
+      "speedmaster": 2,
+      "moonwatch": 3,
+      "seamaster": 0,
+      "constellation": 0,
+      "de ville": 0
+    }
+  };
+  
+  // Check if brand has special models
+  if (specialModels[normalizedBrand]) {
+    // Find the best matching model
+    for (const [modelName, factor] of Object.entries(specialModels[normalizedBrand])) {
+      if (normalizedModel.includes(modelName)) {
+        return factor;
+      }
+    }
+  }
+  
+  // Check for complications regardless of brand
+  if (normalizedModel.includes("tourbillon")) return 10;
+  if (normalizedModel.includes("perpetual calendar")) return 8;
+  if (normalizedModel.includes("minute repeater")) return 12;
+  if (normalizedModel.includes("split second") || normalizedModel.includes("rattrapante")) return 7;
+  if (normalizedModel.includes("chronograph")) return 3;
+  if (normalizedModel.includes("skeleton") || normalizedModel.includes("openworked")) return 5;
+  
+  // Default return
+  return 0;
+}
+
+// Calculate market availability
+function calculateMarketAvailability(marketData) {
+  if (!marketData) {
+    return {
+      level: "Unknown",
+      confidence: "Low",
+      details: "No market data available"
+    };
+  }
+  
+  const demandIndicators = marketData.demandIndicators || [];
+  if (demandIndicators.length === 0) {
+    return {
+      level: "Unknown",
+      confidence: "Low",
+      details: "No demand indicators available"
+    };
+  }
+  
+  // Sort by date, newest first
+  const sortedIndicators = [...demandIndicators].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const latestIndicator = sortedIndicators[0];
+  
+  // Direct availability indicator
+  if (latestIndicator.availability) {
+    return {
+      level: capitalizeFirstLetter(latestIndicator.availability),
+      confidence: "Medium",
+      details: `Based on latest availability indicator (${latestIndicator.date})`
+    };
+  }
+  
+  // Waitlist indicator
+  if (latestIndicator.waitlistTime) {
+    let level;
+    if (latestIndicator.waitlistTime >= 24) level = "Very Low";
+    else if (latestIndicator.waitlistTime >= 12) level = "Low";
+    else if (latestIndicator.waitlistTime >= 6) level = "Medium";
+    else level = "High";
+    
+    return {
+      level: level,
+      confidence: "Medium",
+      details: `Based on ${latestIndicator.waitlistTime} month waitlist time (${latestIndicator.date})`
+    };
+  }
+  
+  if (latestIndicator.waitlistLength) {
+    let level;
+    if (latestIndicator.waitlistLength >= 100) level = "Very Low";
+    else if (latestIndicator.waitlistLength >= 50) level = "Low";
+    else if (latestIndicator.waitlistLength >= 20) level = "Medium";
+    else level = "High";
+    
+    return {
+      level: level,
+      confidence: "Medium",
+      details: `Based on waitlist length of ${latestIndicator.waitlistLength} (${latestIndicator.date})`
+    };
+  }
+  
+  return {
+    level: "Unknown",
+    confidence: "Low",
+    details: "Insufficient market availability data"
+  };
+}
+
+// Calculate market premium
+function calculateMarketPremium(auctionPrices, retailPrices) {
+  if (auctionPrices.length === 0 || retailPrices.length === 0) {
+    return null;
+  }
+  
+  const avgAuctionPrice = auctionPrices.reduce((sum, price) => sum + price, 0) / auctionPrices.length;
+  const avgRetailPrice = retailPrices.reduce((sum, price) => sum + price, 0) / retailPrices.length;
+  
+  if (avgRetailPrice <= 0) {
+    return null;
+  }
+  
+  const premium = ((avgAuctionPrice / avgRetailPrice) - 1) * 100;
+  
+  return {
+    premium: Number(premium.toFixed(2)),
+    avgMarketPrice: Number(avgAuctionPrice.toFixed(2)),
+    avgRetailPrice: Number(avgRetailPrice.toFixed(2)),
+    sampleSize: auctionPrices.length
+  };
+}
+
+// Assess value retention potential
+function assessValueRetention(rarityScore, marketPremium, marketAvailability, brand) {
+  // Base assessment on rarity score
+  let valueRetention = {
+    assessment: "Average",
+    confidence: "Medium",
+    details: "Based on overall rarity assessment"
+  };
+  
+  if (rarityScore >= 85) {
+    valueRetention.assessment = "Exceptional";
+  } else if (rarityScore >= 75) {
+    valueRetention.assessment = "Excellent";
+  } else if (rarityScore >= 65) {
+    valueRetention.assessment = "Very Good";
+  } else if (rarityScore >= 55) {
+    valueRetention.assessment = "Good";
+  } else if (rarityScore < 40) {
+    valueRetention.assessment = "Below Average";
+  }
+  
+  // Adjust based on market premium if available
+  if (marketPremium) {
+    if (marketPremium.premium >= 50 && valueRetention.assessment !== "Exceptional") {
+      valueRetention.assessment = "Exceptional";
+      valueRetention.details = `Commands ${marketPremium.premium}% premium over retail`;
+    } else if (marketPremium.premium >= 30 && 
+              (valueRetention.assessment !== "Exceptional" && valueRetention.assessment !== "Excellent")) {
+      valueRetention.assessment = "Excellent";
+      valueRetention.details = `Commands ${marketPremium.premium}% premium over retail`;
+    } else if (marketPremium.premium <= -20) {
+      valueRetention.assessment = "Poor";
+      valueRetention.details = `Sells at ${Math.abs(marketPremium.premium)}% discount to retail`;
+    }
+  }
+  
+  // Adjust based on market availability
+  if (marketAvailability.level === "Very Low" && 
+     (valueRetention.assessment !== "Exceptional" && valueRetention.assessment !== "Excellent")) {
+    valueRetention.assessment = "Excellent";
+    valueRetention.details = "Very limited market availability";
+  }
+  
+  // Adjust based on brand
+  const prestigiousBrands = ["patek philippe", "audemars piguet", "a. lange & söhne", "rolex", "f.p. journe"];
+  if (prestigiousBrands.includes(brand.toLowerCase())) {
+    // Upgrade by one level if not already at top
+    if (valueRetention.assessment === "Very Good") {
+      valueRetention.assessment = "Excellent";
+      valueRetention.details = "Strong brand value retention";
+    } else if (valueRetention.assessment === "Good") {
+      valueRetention.assessment = "Very Good";
+      valueRetention.details = "Strong brand value retention";
+    }
+  }
+  
+  return valueRetention;
+}
+
+// Generate investment outlook
+function generateInvestmentOutlook(rarityScore, valueRetention, marketData, productionData) {
+  let outlook = {
+    shortTerm: {
+      outlook: "Neutral",
+      confidence: "Medium",
+      rationale: "Based on general market conditions"
+    },
+    longTerm: {
+      outlook: "Neutral",
+      confidence: "Medium",
+      rationale: "Based on general market conditions"
+    }
+  };
+  
+  // Short-term outlook based on market trends
+  if (marketData && marketData.priceHistory && marketData.priceHistory.length >= 2) {
+    // Sort by date
+    const sortedHistory = [...marketData.priceHistory].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    // Get recent price trend (last 6 months if available)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const sixMonthsAgoStr = sixMonthsAgo.toISOString().split('T')[0];
+    
+    const recentHistory = sortedHistory.filter(entry => entry.date >= sixMonthsAgoStr);
+    
+    if (recentHistory.length >= 2) {
+      const firstPrice = recentHistory[0].price;
+      const lastPrice = recentHistory[recentHistory.length - 1].price;
+      const priceChange = ((lastPrice - firstPrice) / firstPrice) * 100;
+      
+      if (priceChange > 10) {
+        outlook.shortTerm.outlook = "Positive";
+        outlook.shortTerm.rationale = `Price increased by ${priceChange.toFixed(1)}% in recent months`;
+      } else if (priceChange > 5) {
+        outlook.shortTerm.outlook = "Slightly Positive";
+        outlook.shortTerm.rationale = `Price increased by ${priceChange.toFixed(1)}% in recent months`;
+      } else if (priceChange < -10) {
+        outlook.shortTerm.outlook = "Negative";
+        outlook.shortTerm.rationale = `Price decreased by ${Math.abs(priceChange).toFixed(1)}% in recent months`;
+      } else if (priceChange < -5) {
+        outlook.shortTerm.outlook = "Slightly Negative";
+        outlook.shortTerm.rationale = `Price decreased by ${Math.abs(priceChange).toFixed(1)}% in recent months`;
+      }
+    }
+  }
+  
+  // Long-term outlook based on rarity and value retention
+  if (rarityScore >= 80 && valueRetention.assessment === "Exceptional") {
+    outlook.longTerm.outlook = "Very Positive";
+    outlook.longTerm.confidence = "High";
+    outlook.longTerm.rationale = "Exceptional rarity and value retention";
+  } else if (rarityScore >= 70 && 
+            (valueRetention.assessment === "Excellent" || valueRetention.assessment === "Exceptional")) {
+    outlook.longTerm.outlook = "Positive";
+    outlook.longTerm.confidence = "High";
+    outlook.longTerm.rationale = "High rarity score and excellent value retention";
+  } else if (rarityScore >= 60 && valueRetention.assessment !== "Below Average") {
+    outlook.longTerm.outlook = "Slightly Positive";
+    outlook.longTerm.rationale = "Good rarity characteristics";
+  } else if (rarityScore < 40 || valueRetention.assessment === "Below Average") {
+    outlook.longTerm.outlook = "Slightly Negative";
+    outlook.longTerm.rationale = "Limited rarity characteristics";
+  }
+  
+  // Adjust for limited editions
+  if (productionData && productionData.isLimitedEdition) {
+    // Upgrade long term outlook if limited and already positive
+    if (outlook.longTerm.outlook === "Slightly Positive") {
+      outlook.longTerm.outlook = "Positive";
+      outlook.longTerm.rationale = "Limited edition with good rarity characteristics";
+    }
+    
+    // For very small limited editions
+    if (productionData.limitedEditionSize && productionData.limitedEditionSize <= 500) {
+      if (outlook.longTerm.outlook !== "Very Positive") {
+        outlook.longTerm.outlook = "Positive";
+        outlook.longTerm.rationale = `Limited to ${productionData.limitedEditionSize} pieces`;
+      }
+    }
+  }
+  
+  // Adjust for discontinued models
+  if (productionData && productionData.discontinuationDate) {
+    const discontinuationYear = parseInt(productionData.discontinuationDate);
+    const currentYear = new Date().getFullYear();
+    
+    if (!isNaN(discontinuationYear) && currentYear - discontinuationYear <= 3) {
+      // Recently discontinued models often appreciate
+      if (outlook.shortTerm.outlook !== "Positive" && outlook.shortTerm.outlook !== "Very Positive") {
+        outlook.shortTerm.outlook = "Slightly Positive";
+        outlook.shortTerm.rationale = "Recently discontinued model";
+      }
+    }
+  }
+  
+  return outlook;
+}
+
+// Helper function to capitalize first letter
+function capitalizeFirstLetter(string) {
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+
