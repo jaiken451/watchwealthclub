@@ -1,0 +1,296 @@
+// Investment Analysis Function
+// Analyzes investment potential for a specific luxury watch model
+
+// Validate required configuration fields
+if (!ai.config.brand) {
+  throw new Error('Watch brand is required');
+}
+
+if (!ai.config.model) {
+  throw new Error('Watch model is required');
+}
+
+// Initialize output variable
+const outputVarName = ai.config.outputVarName || 'investmentAnalysis';
+const referenceNumber = ai.config.referenceNumber || null;
+
+console.log(`Analyzing investment potential for: ${ai.config.brand} ${ai.config.model} ${referenceNumber ? `(${referenceNumber})` : ''}`);
+
+// Initialize watchModels database if it doesn't exist
+if (!ai.vars.global.watchModels) {
+  ai.vars.global.watchModels = {};
+}
+
+// Create a key for this watch model
+const modelKey = `${ai.config.brand}|${ai.config.model}${referenceNumber ? `|${referenceNumber}` : ''}`;
+
+// Check if we have this model in our database
+let modelData = ai.vars.global.watchModels[modelKey];
+
+// If not, create a new entry with default/initial values
+if (!modelData) {
+  modelData = {
+    brand: ai.config.brand,
+    model: ai.config.model,
+    referenceNumber: referenceNumber,
+    historicalPerformance: {
+      oneYear: null,
+      threeYear: null,
+      fiveYear: null,
+      tenYear: null
+    },
+    marketLiquidity: 'medium', // default value
+    investmentRating: null,
+    priceRange: {
+      min: null,
+      max: null,
+      average: null
+    },
+    supplyFactors: [],
+    demandFactors: [],
+    lastUpdated: null,
+    userData: {
+      notes: [],
+      pricePoints: []
+    }
+  };
+}
+
+// Update with user-provided data if present
+if (ai.config.historicalPerformance) {
+  modelData.historicalPerformance = {
+    ...modelData.historicalPerformance,
+    ...ai.config.historicalPerformance
+  };
+}
+
+if (ai.config.marketLiquidity) {
+  modelData.marketLiquidity = ai.config.marketLiquidity;
+}
+
+if (ai.config.priceRange) {
+  modelData.priceRange = {
+    ...modelData.priceRange,
+    ...ai.config.priceRange
+  };
+}
+
+if (ai.config.investmentRating) {
+  modelData.investmentRating = ai.config.investmentRating;
+}
+
+// Add supply/demand factors if provided
+if (ai.config.supplyFactors && Array.isArray(ai.config.supplyFactors)) {
+  modelData.supplyFactors = [...new Set([...modelData.supplyFactors, ...ai.config.supplyFactors])];
+}
+
+if (ai.config.demandFactors && Array.isArray(ai.config.demandFactors)) {
+  modelData.demandFactors = [...new Set([...modelData.demandFactors, ...ai.config.demandFactors])];
+}
+
+// Add a user price point if provided
+if (ai.config.addPricePoint && ai.config.price) {
+  const now = new Date();
+  modelData.userData.pricePoints.push({
+    price: Number(ai.config.price),
+    date: now.toISOString().split('T')[0],
+    source: ai.config.priceSource || 'user input'
+  });
+  
+  // Sort price points by date
+  modelData.userData.pricePoints.sort((a, b) => new Date(a.date) - new Date(b.date));
+  
+  console.log(`Added price point: ${ai.config.price} on ${now.toISOString().split('T')[0]}`);
+}
+
+// Add a note if provided
+if (ai.config.addNote && ai.config.note) {
+  const now = new Date();
+  modelData.userData.notes.push({
+    note: ai.config.note,
+    date: now.toISOString().split('T')[0]
+  });
+  
+  console.log(`Added note on ${now.toISOString().split('T')[0]}`);
+}
+
+// Update last updated timestamp
+modelData.lastUpdated = new Date().toISOString();
+
+// Save updated model data
+ai.vars.global.watchModels[modelKey] = modelData;
+
+// Calculate investment score
+let investmentScore = 0;
+let factors = [];
+
+// Factor 1: Historical performance
+if (modelData.historicalPerformance.fiveYear) {
+  const fiveYearPerformance = modelData.historicalPerformance.fiveYear;
+  if (fiveYearPerformance > 100) {
+    investmentScore += 25;
+    factors.push(`Exceptional 5-year performance (+${fiveYearPerformance}%): +25 points`);
+  } else if (fiveYearPerformance > 50) {
+    investmentScore += 20;
+    factors.push(`Strong 5-year performance (+${fiveYearPerformance}%): +20 points`);
+  } else if (fiveYearPerformance > 20) {
+    investmentScore += 15;
+    factors.push(`Good 5-year performance (+${fiveYearPerformance}%): +15 points`);
+  } else if (fiveYearPerformance > 0) {
+    investmentScore += 10;
+    factors.push(`Positive 5-year performance (+${fiveYearPerformance}%): +10 points`);
+  } else if (fiveYearPerformance > -10) {
+    investmentScore += 5;
+    factors.push(`Stable 5-year performance (${fiveYearPerformance}%): +5 points`);
+  } else {
+    investmentScore += 0;
+    factors.push(`Negative 5-year performance (${fiveYearPerformance}%): +0 points`);
+  }
+}
+
+// Factor 2: Market liquidity
+if (modelData.marketLiquidity) {
+  const liquidityScores = {
+    'very high': 20,
+    'high': 15,
+    'medium': 10,
+    'low': 5,
+    'very low': 0
+  };
+  
+  const liquidityScore = liquidityScores[modelData.marketLiquidity.toLowerCase()] || 0;
+  investmentScore += liquidityScore;
+  factors.push(`${modelData.marketLiquidity} market liquidity: +${liquidityScore} points`);
+}
+
+// Factor 3: Supply constraints
+const supplyFactorScore = Math.min(25, modelData.supplyFactors.length * 5);
+if (supplyFactorScore > 0) {
+  investmentScore += supplyFactorScore;
+  factors.push(`Supply constraints (${modelData.supplyFactors.length} factors): +${supplyFactorScore} points`);
+}
+
+// Factor 4: Demand drivers
+const demandFactorScore = Math.min(25, modelData.demandFactors.length * 5);
+if (demandFactorScore > 0) {
+  investmentScore += demandFactorScore;
+  factors.push(`Demand drivers (${modelData.demandFactors.length} factors): +${demandFactorScore} points`);
+}
+
+// Factor 5: Brand strength
+const brandStrengthScores = {
+  'rolex': 15,
+  'patek philippe': 15,
+  'audemars piguet': 15,
+  'a. lange & söhne': 12,
+  'f.p. journe': 12,
+  'richard mille': 12,
+  'omega': 10,
+  'vacheron constantin': 10,
+  'cartier': 8,
+  'jaeger-lecoultre': 8,
+  'iwc': 6,
+  'panerai': 6,
+  'tudor': 6,
+  'breitling': 5,
+  'grand seiko': 5,
+  'tag heuer': 4,
+  'longines': 3,
+  'oris': 2
+};
+
+const brandStrengthScore = brandStrengthScores[ai.config.brand.toLowerCase()] || 0;
+if (brandStrengthScore > 0) {
+  investmentScore += brandStrengthScore;
+  factors.push(`Brand strength (${ai.config.brand}): +${brandStrengthScore} points`);
+}
+
+// Determine investment rating based on score
+let investmentRating;
+if (investmentScore >= 85) {
+  investmentRating = "Exceptional";
+} else if (investmentScore >= 70) {
+  investmentRating = "Excellent";
+} else if (investmentScore >= 55) {
+  investmentRating = "Strong";
+} else if (investmentScore >= 40) {
+  investmentRating = "Good";
+} else if (investmentScore >= 25) {
+  investmentRating = "Fair";
+} else {
+  investmentRating = "Poor";
+}
+
+// Update investment rating in model data
+modelData.investmentRating = investmentRating;
+ai.vars.global.watchModels[modelKey] = modelData;
+
+// Calculate price trend if we have price points
+let priceTrend = null;
+if (modelData.userData.pricePoints.length >= 2) {
+  const oldestPoint = modelData.userData.pricePoints[0];
+  const newestPoint = modelData.userData.pricePoints[modelData.userData.pricePoints.length - 1];
+  
+  const oldestDate = new Date(oldestPoint.date);
+  const newestDate = new Date(newestPoint.date);
+  
+  const daysDiff = Math.round((newestDate - oldestDate) / (1000 * 60 * 60 * 24));
+  
+  if (daysDiff > 0) {
+    const percentChange = ((newestPoint.price - oldestPoint.price) / oldestPoint.price) * 100;
+    const annualizedChange = percentChange * (365 / daysDiff);
+    
+    priceTrend = {
+      totalChange: Number(percentChange.toFixed(2)),
+      annualizedChange: Number(annualizedChange.toFixed(2)),
+      daysPeriod: daysDiff,
+      startPrice: oldestPoint.price,
+      currentPrice: newestPoint.price
+    };
+  }
+}
+
+// Prepare output analysis
+const analysis = {
+  watch: {
+    brand: ai.config.brand,
+    model: ai.config.model,
+    referenceNumber: referenceNumber
+  },
+  investmentPotential: {
+    score: investmentScore,
+    rating: investmentRating,
+    factors: factors
+  },
+  marketLiquidity: modelData.marketLiquidity,
+  historicalPerformance: modelData.historicalPerformance,
+  supplyFactors: modelData.supplyFactors,
+  demandFactors: modelData.demandFactors,
+  priceTrend: priceTrend,
+  recommendation: generateRecommendation(investmentScore, modelData),
+  priceRange: modelData.priceRange,
+  lastUpdated: new Date().toISOString()
+};
+
+// Store analysis in output variable
+ai.vars[outputVarName] = analysis;
+
+console.log(`Investment analysis complete for ${ai.config.brand} ${ai.config.model}`);
+console.log(`Investment score: ${investmentScore}/100 (${investmentRating})`);
+
+// Generate investment recommendation based on score and model data
+function generateRecommendation(score, modelData) {
+  if (score >= 85) {
+    return "Strong Buy - Exceptional investment potential with high likelihood of appreciation";
+  } else if (score >= 70) {
+    return "Buy - Excellent investment characteristics with good potential for growth";
+  } else if (score >= 55) {
+    return "Moderate Buy - Strong investment potential but consider timing and entry price";
+  } else if (score >= 40) {
+    return "Hold - Good long-term investment but limited short-term growth potential";
+  } else if (score >= 25) {
+    return "Speculative - Only consider for collection purposes or if available significantly below market";
+  } else {
+    return "Avoid as Investment - Low probability of appreciation, consider for collection value only";
+  }
+}
